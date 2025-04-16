@@ -1,53 +1,65 @@
 {
-  description = "A flake for ghc-persistent-worker";
+  description = "GHC persistent worker";
+
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+    hix.url = "github:tek/hix";
+    hix.inputs.nixpkgs.url = "github:nixos/nixpkgs/b2243f41e860ac85c0b446eadc6930359b294e79";
+    ghc-debug = {
+      url = "git+https://gitlab.haskell.org/ghc/ghc-debug";
+      flake = false;
+    };
   };
 
-  outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-    }:
-    flake-utils.lib.eachDefaultSystem (
-      system:
-      let
-        pkgs = import nixpkgs {
-          inherit system;
-        };
+  outputs = inputs@{hix, ...}: hix [({lib, util, ...}: {
+    compiler = "ghc910";
+    ghcVersions = [];
+    main = "ghc-worker";
+    ghci.args = ["-package ghc" "-DMWB" "-DDOWNSWEEP_CACHE" "-DUNIT_INDEX"];
+    hls.genCabal = false;
 
-      in
-      {
-        devShells.default =
-          let
-            libs = [
-              pkgs.zstd
-              pkgs.xz
-              pkgs.bzip2
-              pkgs.zlib
-            ];
-          in
-          pkgs.mkShell {
-            ghc_dir = "${pkgs.haskell.compiler.ghc910}";
+    compilers = {
 
-            packages = [
-              (pkgs.haskell.packages.ghc910.ghcWithPackages (g: [ g.cabal-install ]))
-              pkgs.zlib.dev
-              pkgs.snappy
-              pkgs.protobuf
-              pkgs.git
-              pkgs.nixfmt-rfc-style
-            ] ++ libs;
+      # Roughly the GHC used by MWB.
+      mwb-26-01-ipe.source.build = {
+        url = "https://gitlab.haskell.org/ghc/ghc";
+        version = "9.10.1";
+        flavour = "release+split_sections+ipe";
+        rev = "65d1ec83348e10082f60a4ae400cbcd31f76ad05";
+        hash = "sha256-mUnXDm708rVZH9wiglOUZ6bnS83Aln6ik+r2uTfDoP0=";
+      };
 
-            shellHook = ''
-              # prompt
-              export PS1="\n[ghc-persistent-worker:\w]$ \0"
-              # dynamic library path
-              export LD_LIBRARY_PATH="${pkgs.lib.makeSearchPathOutput "out" "lib" libs}:$LD_LIBRARY_PATH"
-            '';
-          };
-      }
-    );
+      # More recent GHC that includes fixed module graph nodes, with all of the custom patches present in `mwb-26-01`.
+      mwb-25-10-ipe.source.build = {
+        url = "https://gitlab.haskell.org/ghc/ghc";
+        version = "9.12.1";
+        flavour = "release+split_sections+ipe";
+        rev = "99d4164fcd5cbc23c1f00bf5fd2e8f710d10bf16";
+        hash = "sha256-yN0jQJiVAcBNCpHUpxPzFSGgY4TAO0xpfdzQl9L5lgs=";
+      };
+
+    };
+
+    output.extraPackages = ["ghc-debug-brick" "eventlog2html" "hp2pretty" "ghc-events"];
+
+    outputs.apps.rebuild-impure-worker = util.app (util.zscript "rebuild-impure-worker" ''
+    if [[ -z $1 ]]
+    then
+      echo "Usage: nix run .#rebuild-impure-worker GHC_BUILD_DIR [DEV_SHELL]"
+      exit 1
+    fi
+    dir=$1
+    nix develop .#''${2-cabal-build} -c cabal build -fmwb -funit-index -fdownsweep-cache $@[3,$] -w $dir/stage1/bin/ghc ghc-worker
+    print 'Worker executable:'
+    cabal -v0 list-bin ghc-worker
+    '');
+
+    internal.hixCli.dev = true;
+
+  })
+
+  (import ./ops/packages.nix)
+  (import ./ops/package-sets.nix inputs)
+
+  ];
+
 }
