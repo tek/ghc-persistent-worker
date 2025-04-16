@@ -1,30 +1,47 @@
 {
   "nodes": {
-    "flake-utils": {
+    "ghc-debug": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1755700118,
+        "narHash": "sha256-5JIVZbahlpCi6eo11n+Dfy6VbM5K8MmxafCLS7APY6w=",
+        "ref": "refs/heads/master",
+        "rev": "1b0f36fab86e9baa9734c88dcc1dbe17d10d8c93",
+        "revCount": 623,
+        "type": "git",
+        "url": "https://gitlab.haskell.org/ghc/ghc-debug"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://gitlab.haskell.org/ghc/ghc-debug"
+      }
+    },
+    "hix": {
       "inputs": {
-        "systems": "systems"
+        "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1731533236,
-        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
-        "owner": "numtide",
-        "repo": "flake-utils",
-        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "lastModified": 1761693850,
+        "narHash": "sha256-wprxWh4H+102dyNgUYkJVinkgjUD7j4JeQbzzpjR0K4=",
+        "owner": "tek",
+        "repo": "hix",
+        "rev": "aea37e6c6559586c370dee8043e90c391f08f860",
         "type": "github"
       },
       "original": {
-        "owner": "numtide",
-        "repo": "flake-utils",
+        "owner": "tek",
+        "ref": "package-set-overrides",
+        "repo": "hix",
         "type": "github"
       }
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1744536153,
-        "narHash": "sha256-awS2zRgF4uTwrOKwwiJcByDzDOdo3Q1rPZbiHQg/N38=",
+        "lastModified": 1739138025,
+        "narHash": "sha256-M4ilIfGxzbBZuURokv24aqJTbdjPA9K+DtKUzrJaES4=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "18dd725c29603f582cf1900e0d25f9f1063dbf11",
+        "rev": "b2243f41e860ac85c0b446eadc6930359b294e79",
         "type": "github"
       },
       "original": {
@@ -36,23 +53,8 @@
     },
     "root": {
       "inputs": {
-        "flake-utils": "flake-utils",
-        "nixpkgs": "nixpkgs"
-      }
-    },
-    "systems": {
-      "locked": {
-        "lastModified": 1681028828,
-        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
-        "owner": "nix-systems",
-        "repo": "default",
-        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-systems",
-        "repo": "default",
-        "type": "github"
+        "ghc-debug": "ghc-debug",
+        "hix": "hix"
       }
     }
   },
