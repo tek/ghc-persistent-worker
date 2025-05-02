@@ -188,7 +188,6 @@
       buildInputs = pkgs: [pkgs.zlib pkgs.snappy pkgs.protobuf];
     };
 
-
     envs.hls-db = {
       package-set.extends = "mwb-25-07";
     };
@@ -315,6 +314,16 @@
           source-dirs = "test";
           dependOnLibrary = false;
         };
+      };
+
+      debug = {
+        src = ./debug;
+        cabal.dependencies = ["ghc-debug-client" "ghc-debug-common" "ghc-debug-stub" "containers"];
+        executable.enable = true;
+        executables.snapshot = {
+          dependencies = ["directory" "filepath"];
+        };
+        executables.gen-case = {};
       };
 
       buck-proxy = {

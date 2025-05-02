@@ -119,6 +119,8 @@ test-suite worker-test
     directory,
     filepath,
     ghc,
+    ghc-debug-stub,
+    ghc-experimental,
     temporary,
     text,
     transformers,
