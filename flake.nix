@@ -155,19 +155,6 @@
       overrides = commonOverrides "mwb-25-07" args ++ [ipeOverrides];
     };
 
-    commands.dev-prof = {
-      expose = true;
-      env = "dev";
-      command = "${build.packages.dev.buck-worker.executables.profile.app.program} $@";
-    };
-
-    commands.prof = {
-      expose = true;
-      env = "profiled";
-      command = "${build.packages.profiled.buck-worker.executables.profile.app.program} +RTS -RTS $@";
-    };
-
-
     envs.hls-db = {};
 
     envs.hls.compiler = "ghc910";
@@ -241,6 +228,16 @@
           source-dirs = "test";
           dependOnLibrary = false;
         };
+      };
+
+      debug = {
+        src = ./debug;
+        cabal.dependencies = ["ghc-debug-client" "ghc-debug-common" "ghc-debug-stub" "containers"];
+        executable.enable = true;
+        executables.snapshot = {
+          dependencies = ["directory" "filepath"];
+        };
+        executables.gen-case = {};
       };
 
       buck-proxy = {
