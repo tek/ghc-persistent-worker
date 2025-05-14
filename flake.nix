@@ -6,8 +6,12 @@
     url = "git+https://gitlab.haskell.org/ghc/ghc-debug";
     flake = false;
   };
+  inputs.fenix = {
+    url = "github:nix-community/fenix/9d17341a4f227fe15a0bca44655736b3808e6a03";
+    inputs.nixpkgs.follows = "hix/nixpkgs";
+  };
 
-  outputs = {hix, ghc-debug, ...}: let
+  outputs = {hix, ghc-debug, fenix, ...}: let
 
     testEnv = config: {
       ghc_dir = "${config.toolchain.vanilla.ghc}";
@@ -38,7 +42,26 @@
       ghc-worker = notest;
     };
 
-  in hix ({config, build, lib, ...}: {
+  in hix ({config, build, lib, util, ...}: let
+
+    globalConfig = config;
+
+    buckTest = dir: {
+      expose = true;
+      env = "buck";
+      command = "${import ./ops/buck-test/${dir} { inherit util; }}";
+    };
+
+    localOptions = {
+      options.buck.ipe = lib.mkOption {
+        description = "Whether to use the IPE-enabled compiler.";
+        type = lib.types.bool;
+        default = true;
+      };
+    };
+
+  in {
+    imports = [localOptions];
 
     compiler = "ghc910";
     ghcVersions = [];
@@ -109,11 +132,66 @@
       package-set.compiler = "mwb-ipe";
     };
 
+    # ------------------------------------------------------------------------------------------------------------------
+    # Buck
+
+    # The environment for the CLI tool `buck`, using the Buck overlay extracted from MWB.
+    # `fenix` is a dep of Buck.
+    # Exposes a devShell named `buck` that should be used to gain access to the CLI tool.
+    envs.buck = {
+      expose.shell = true;
+      packages = [];
+      buildInputs = pkgs: [pkgs.buck2-source];
+
+      package-set.compiler.nixpkgs.overlays = [
+        fenix.overlays.default
+        (import ./ops/buck/overlay.nix)
+      ];
+    };
+
+    buck.ipe = true;
+
+    # The environment for our Buck nixpkgs integration, from which GHC and the package set are taken when exposing them
+    # in `outputs.packages` below.
+    # Uses our custom GHC build and injects a hook into all Haskell derivations that creates `package.cache` in the
+    # store dir, which is needed because Buck supplies individual package DBs to GHC.
+    envs.buck-build = {config, ...}: {
+      packages = [];
+      package-set.compiler = if globalConfig.buck.ipe then "mwb-ipe" else "mwb";
+      env = testEnv config;
+
+      overrides = api@{override, ...}: let
+        testDeps = import ./ops/test-deps.nix { inherit util; };
+      in testDeps.overrides api // {
+        __all = override (drv: {
+          postInstall = (drv.postInstall or "") + ''
+            ghc-pkg recache --package-db $packageConfDir
+          '';
+        });
+      };
+    };
+
+    # The interface that Buck expects when loading Nix packages in `toolchains/BUCK` using those `nix.rules.flake`
+    # rules.
+    # Exposes the toolchain Haskell packages listed in `./ops/ghc-toolchain-libraries.nix` in the attribute
+    # `haskellPackages.libs` as well as Python and the GHC compiler derivation.
+    outputs.packages =
+      import ./ops/buck/packages.nix { inherit config lib; };
+
+    # ------------------------------------------------------------------------------------------------------------------
+
     envs.hls-db = {};
 
     commands.hls.env = "hls-db";
 
     output.extraPackages = ["ghc-debug-brick" "eventlog2html" "hp2pretty" "ghc-events"];
+
+    commands.comparison-1 = buckTest "comparison1";
+    commands.comparison-2 = buckTest "comparison2";
+    commands.three-layers = buckTest "three-layers";
+    commands.restore = buckTest "restore";
+    commands.reexport = buckTest "reexport";
+    commands.hybrid = buckTest "hybrid";
 
     packages = let
       ghc-options = ["-DMWB" "-DMWB_2025_07" "-O2"];
@@ -173,6 +251,20 @@
           source-dirs = "test";
           dependOnLibrary = false;
         };
+
+        executables.batch-worker = {};
+
+        executables.ghc-bin = {
+          dependencies = [
+            "containers"
+            "filepath"
+            "ghc"
+            "ghc-boot"
+            "transformers"
+          ];
+          dependOnLibrary = false;
+        };
+
       };
 
       debug = {
@@ -403,4 +495,5 @@
     };
 
   });
+
 }
