@@ -55,7 +55,10 @@ library
     ghc-debug-stub,
     grapesy ^>=1.0.1,
     process,
-    text
+    stm,
+    temporary,
+    text,
+    unix
 
 executable ghc-worker
   import: all

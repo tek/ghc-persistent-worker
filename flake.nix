@@ -8,6 +8,11 @@
       url = "git+https://gitlab.haskell.org/ghc/ghc-debug";
       flake = false;
     };
+    fenix = {
+      url = "github:nix-community/fenix/6c51b42ac2c25328067956ff980572482786d20c";
+      inputs.nixpkgs.url = "github:nixos/nixpkgs/9807714d6944a957c2e036f84b0ff8caf9930bc0";
+    };
+    nix.url = "github:nixos/nix/2.34.2";
   };
 
   outputs = inputs@{hix, ...}: hix [({lib, util, ...}: {
@@ -39,6 +44,9 @@
 
     };
 
+    # The compiler from the above set used for Buck builds.
+    buckGhc = "mwb-26-01";
+
     output.extraPackages = ["ghc-debug-brick" "eventlog2html" "hp2pretty" "ghc-events"];
 
     outputs.apps.rebuild-impure-worker = util.app (util.zscript "rebuild-impure-worker" ''
@@ -57,8 +65,10 @@
 
   })
 
+  (import ./ops/options.nix)
   (import ./ops/packages.nix)
   (import ./ops/package-sets.nix inputs)
+  (import ./ops/buck/default.nix inputs)
 
   ];
 
