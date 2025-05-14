@@ -6,8 +6,12 @@
     url = "git+https://gitlab.haskell.org/ghc/ghc-debug";
     flake = false;
   };
+  inputs.fenix = {
+    url = "github:nix-community/fenix/9d17341a4f227fe15a0bca44655736b3808e6a03";
+    inputs.nixpkgs.follows = "hix/nixpkgs";
+  };
 
-  outputs = {hix, ghc-debug, ...}: let
+  outputs = {hix, ghc-debug, fenix, ...}: let
 
     testEnv = config: {
       ghc_dir = "${config.toolchain.vanilla.ghc}";
@@ -38,9 +42,17 @@
       ghc-worker = notest;
     };
 
-  in hix ({config, build, lib, ...}: let
+  in hix ({config, build, lib, util, ...}: let
+
+    globalConfig = config;
 
     localOptions.options = {
+
+      buck.ipe = lib.mkOption {
+        description = "Whether to use the IPE-enabled compiler.";
+        type = lib.types.bool;
+        default = true;
+      };
 
       oldMwbGhcBranch = lib.mkOption {
         description = "Whether to use the GHC branch with the old versions of the bytecode patches.";
@@ -142,11 +154,73 @@
       package-set.compiler = "mwb-ipe";
     };
 
+    # ------------------------------------------------------------------------------------------------------------------
+    # Buck
+
+    # The environment for the CLI tool `buck`, using the Buck overlay extracted from MWB.
+    # `fenix` is a dep of Buck.
+    # Exposes a devShell named `buck` that should be used to gain access to the CLI tool.
+    envs.buck = {
+      expose.shell = true;
+      packages = [];
+      buildInputs = pkgs: [pkgs.buck2-source];
+
+      package-set.compiler.nixpkgs.overlays = [
+        fenix.overlays.default
+        (import ./ops/buck/overlay.nix)
+      ];
+    };
+
+    buck.ipe = true;
+
+    # The environment for our Buck nixpkgs integration, from which GHC and the package set are taken when exposing them
+    # in `outputs.packages` below.
+    # Uses our custom GHC build and injects a hook into all Haskell derivations that creates `package.cache` in the
+    # store dir, which is needed because Buck supplies individual package DBs to GHC.
+    envs.buck-build = {config, ...}: {
+      packages = [];
+      package-set.compiler = if globalConfig.buck.ipe then "mwb-ipe" else "mwb";
+      env = testEnv config;
+
+      overrides = api@{override, ...}: let
+        testDeps = import ./ops/test-deps.nix { inherit util; };
+      in testDeps.overrides api // {
+        __all = override (drv: {
+          postInstall = (drv.postInstall or "") + ''
+            ghc-pkg recache --package-db $packageConfDir
+          '';
+        });
+      };
+    };
+
+    # The interface that Buck expects when loading Nix packages in `toolchains/BUCK` using those `nix.rules.flake`
+    # rules.
+    # Exposes the toolchain Haskell packages listed in `./ops/ghc-toolchain-libraries.nix` in the attribute
+    # `haskellPackages.libs` as well as Python and the GHC compiler derivation.
+    outputs.packages =
+      import ./ops/buck/packages.nix { inherit config lib; };
+
+    # ------------------------------------------------------------------------------------------------------------------
+
     envs.hls-db = {};
 
-    commands.hls.env = "hls-db";
-
     output.extraPackages = ["ghc-debug-brick" "eventlog2html" "hp2pretty" "ghc-events"];
+
+    commands = let
+
+      testNames = lib.attrNames (lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./ops/buck-test));
+
+      buck-test = import ./ops/buck-test/default.nix { inherit util; };
+
+      buckTest = name: {
+        expose = true;
+        env = "buck";
+        command = buck-test name (import ./ops/buck-test/${name}/default.nix { inherit util; });
+      };
+
+    in lib.genAttrs testNames buckTest // {
+      hls.env = "hls-db";
+    };
 
     packages = let
       ghc-options = mwbCppOpts ++ ["-DMWB" "-O2"];
@@ -206,6 +280,20 @@
           source-dirs = "test";
           dependOnLibrary = false;
         };
+
+        executables.batch-worker = {};
+
+        executables.ghc-bin = {
+          dependencies = [
+            "containers"
+            "filepath"
+            "ghc"
+            "ghc-boot"
+            "transformers"
+          ];
+          dependOnLibrary = false;
+        };
+
       };
 
       debug = {
@@ -436,4 +524,5 @@
     };
 
   });
+
 }
