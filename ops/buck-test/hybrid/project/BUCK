@@ -1,0 +1,32 @@
+load("//haskell:custom.bzl", "haskell_lib", "haskell_bin")
+
+haskell_lib(
+    name = "hybrid1",
+    srcs = [
+        "Hybrid/M1.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        "//haskell:process",
+    ],
+    external_tools = [
+        "@toolchains//:th-exe",
+    ],
+    allow_worker = False,
+)
+
+haskell_lib(
+    name = "hybrid2",
+    srcs = [
+        "M2.hs",
+        "M3.hs",
+    ],
+    deps = [
+        "//haskell:base",
+        "//haskell:template-haskell",
+        ":hybrid1",
+        "//haskell:dep1",
+    ],
+)
+

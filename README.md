@@ -30,3 +30,45 @@ $ cabal run ghc-persistent-worker-server -- --ghc ~/repo/srcc/ghcHEAD/_build/sta
 $ GHC_PERSISTENT_WORKER_SOCKET=/tmp/ghc_server.ipc cabal run ghc-persistent-worker-client -- test/A.hs
 ```
 (optionally, one can set `--package-db (pkg_db_path)`. One can have multiple `--package-db`.)
+
+Buck
+====
+
+The flake provides a test environment for Buck with a locally Nix-built worker.
+Enter the shell `buck` to use it:
+
+```
+$ nix develop .#buck
+$ buck build //ops/buck-test/three-layers/project/...
+
+```
+
+The flake provides the module option `buckGhc` that allows you to select the compiler you would like to use.
+The option definition lists the supported values, currently `["mwb" "mwb-25-07" "mwb-25-07-no-ipe" "mwb-25-10"]`.
+If you want to add an entry, you will have to create new config values in `envs` and `package-sets` by your chosen name.
+You can copy an existing config and adapt it.
+
+
+Local GHC development
+=====================
+
+You can build the worker executable with a GHC built in a local checkout, as long as the GHC configured in `flake.nix`
+is binary compatible (i.e. you made some changes to the branch used here, and didn't change the interface format).
+
+Assuming the build directory is `/path/to/ghc/_build`, you can execute:
+
+```
+nix run .#rebuild-impure-worker /path/to/ghc/_build
+```
+
+The app will print the path of the executable, which can then be inserted into the `binary_path` attribute of the
+`impure_worker` target named `impure_ghc_worker` in `toolchains/BUCK`.
+In order to use it, the `persistent_worker` target must set the attribute `worker = ":impure_ghc_worker"`.
+
+This will cause subsequent Buck builds to use the new worker executable.
+
+HLS
+===
+
+When the GHC used to build HLS includes patches that influence CPP pragmas in the worker, you need to enable those in
+`cabal.project`.
