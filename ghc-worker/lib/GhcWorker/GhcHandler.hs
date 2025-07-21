@@ -22,9 +22,9 @@ import Internal.AbiHash (AbiHash (..), showAbiHash)
 import Internal.Compile (compileModuleWithDepsInEps)
 import Internal.CompileHpt (compileModuleWithDepsInHpt)
 import Internal.Debug (debugSocketPath)
-import Internal.Log (TraceId, dbg, logDebug, logFlush, newLog, setLogTarget)
+import Internal.Log (Log, TraceId, dbg, logDebug, logFlush, newLog, setLogTarget)
 import Internal.Metadata (computeMetadata)
-import Internal.Session (Env (..), withGhc, withGhcMhu)
+import Internal.Session (Env (..), withGhc, withGhcForModule)
 import Internal.State (ModuleArtifacts (..), WorkerState (..), dumpState)
 import Prelude hiding (log)
 import System.Exit (ExitCode (ExitSuccess))
@@ -33,7 +33,7 @@ import Types.BuckArgs (BuckArgs, Mode (..), parseBuckArgs, toGhcArgs)
 import qualified Types.BuckArgs
 import Types.GhcHandler (WorkerMode (..))
 import Types.Grpc (RequestArgs (..))
-import Types.State (Target (..))
+import Types.State (TargetSpec (..))
 
 data LockState = LockStart | LockFreeze Int | LockThaw Int | LockEnd
   deriving stock (Eq, Show)
@@ -59,10 +59,10 @@ withLock maxLock lock action = do
 -- make-style implementation.
 compileAndReadAbiHash ::
   GhcMode ->
-  (Target -> Ghc (Maybe ModuleArtifacts)) ->
+  (TargetSpec -> Ghc (Maybe ModuleArtifacts)) ->
   Hooks ->
   BuckArgs ->
-  Target ->
+  TargetSpec ->
   Ghc (Maybe CompileResult)
 compileAndReadAbiHash ghcMode compile hooks args target = do
   liftIO $ hooks.compileStart args (Just target)
@@ -85,8 +85,8 @@ dispatch ::
   Hooks ->
   Env ->
   BuckArgs ->
-  (Target -> IO FeatureInstrument) ->
-  IO (Int32, Maybe Target)
+  (TargetSpec -> IO FeatureInstrument) ->
+  IO (Int32, Maybe TargetSpec)
 dispatch lock workerMode hooks env args targetCallback =
   case args.mode of
     Just ModeCompile -> do
@@ -112,13 +112,15 @@ dispatch lock workerMode hooks env args targetCallback =
   where
     compile = case workerMode of
       WorkerOneshotMode ->
-        withGhc env (withTarget (compileAndReadAbiHash OneShot compileModuleWithDepsInEps hooks args))
-      WorkerMakeMode ->
-        withGhcMhu env \ _ ->
-          withTarget (compileAndReadAbiHash CompManager compileModuleWithDepsInHpt hooks args)
+        withGhc env (withTarget (compileAndReadAbiHash OneShot compileModuleWithDepsInEps hooks args) . TargetSource)
+      WorkerMakeMode -> do
+        logDebug env.log "dispatching make mode"
+        withGhcForModule env $
+          withTarget (compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log) hooks args)
 
-    withTarget f target =
+    withTarget f (target :: TargetSpec) =
       reifyGhc $ \session -> do
+        setLogTarget env.log target
         instrument <- targetCallback target
         let path = debugSocketPath target
         (if instrument.flag then withGhcDebugUnix path else id) $
@@ -126,13 +128,14 @@ dispatch lock workerMode hooks env args targetCallback =
 
 processResult ::
   Hooks ->
-  Env ->
-  Either IOError (Int32, Maybe Target) ->
+  MVar Log ->
+  MVar WorkerState ->
+  Either IOError (Int32, Maybe TargetSpec) ->
   IO ([String], Int32)
-processResult hooks env result = do
+processResult hooks logVar stateVar result = do
   when (exitCode /= 0) do
-    dumpState env.log env.state exception
-  output <- logFlush env.log
+    dumpState logVar stateVar exception
+  output <- logFlush logVar
   hooks.compileFinish (hookPayload output)
   pure (output, exitCode)
   where
@@ -163,15 +166,18 @@ ghcHandler ::
   InstrumentedHandler
 ghcHandler lock state workerMode instrument traceId =
   InstrumentedHandler \ hooks -> GrpcHandler \ commandEnv argv -> do
-    buckArgs <- either (throwIO . userError) pure (parseBuckArgs commandEnv argv)
-    args <- toGhcArgs buckArgs
     log <- newLog traceId
-    logDebug log (unlines (coerce argv))
-    let env = Env {log, state, args}
-    result <- try $ dispatch lock workerMode hooks env buckArgs $ \ target -> do
-      setLogTarget log target
-      when instrument.flag $
-        modifyMVar_ state \ st ->
-          pure $ st {targetArgs = Map.insert target (commandEnv, argv) st.targetArgs}
-      pure instrument
-    processResult hooks env result
+    result <- try do
+      buckArgs <- either parseError pure (parseBuckArgs commandEnv argv)
+      args <- toGhcArgs buckArgs
+      logDebug log (unlines (coerce argv))
+      let env = Env {log, state, args}
+      dispatch lock workerMode hooks env buckArgs $ \ target -> do
+        when instrument.flag $
+          modifyMVar_ state \ st ->
+            pure $ st {targetArgs = Map.insert target (commandEnv, argv) st.targetArgs}
+        pure instrument
+    processResult hooks log state result
+  where
+    parseError msg =
+      throwIO (userError ("Parsing Buck args failed: " ++ msg))

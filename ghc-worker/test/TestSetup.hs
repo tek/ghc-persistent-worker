@@ -132,7 +132,8 @@ baseArgs topdir tmp =
     workerTargetId = Just (TargetId "test"),
     binPath = [],
     tempDir = Nothing,
-    ghcPath = Nothing,
+    unit = Nothing,
+    moduleName = Nothing,
     ghcOptions = (artifactDir =<< ["o", "hie", "dump"]) ++ [
       "-fwrite-ide-info",
       "-no-link",
@@ -152,7 +153,8 @@ baseArgs topdir tmp =
       -- , "-v"
       -- , "-ddump-if-trace"
     ],
-    cachedDeps = Nothing
+    cachedDeps = Nothing,
+    cachedBuildPlans = Nothing
   }
   where
     artifactDir a = ["-" ++ a ++ "dir", tmp </> "out"]

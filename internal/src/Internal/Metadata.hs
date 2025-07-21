@@ -2,70 +2,40 @@ module Internal.Metadata where
 
 import Control.Concurrent (readMVar)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Maybe (MaybeT (..))
+import Data.Foldable (for_)
 import Data.Maybe (isJust)
-import GHC (DynFlags (..), Ghc, GhcMode (..), Logger, ModuleGraph)
+import GHC (DynFlags (..), Ghc, GhcMode (..), ModuleGraph, getSession, getSessionDynFlags, setSession)
 import GHC.Driver.Env (HscEnv (..), hscSetActiveUnitId, hscUpdateFlags, hscUpdateLoggerFlags)
 import GHC.Driver.Monad (modifySession, modifySessionM, withSession, withTempSession)
-import GHC.Driver.Session (updatePlatformConstants)
 import GHC.Platform.Ways (Way (WayDyn), addWay)
 import GHC.Runtime.Loader (initializeSessionPlugins)
-import GHC.Unit (HomeUnit, UnitDatabase, UnitId, UnitState, initUnits, unitIdString)
-import GHC.Unit.Env (HomeUnitEnv (..), UnitEnv (..), unitEnv_insert, unitEnv_keys, updateHug)
-import GHC.Unit.Home.ModInfo (emptyHomePackageTable)
-import Internal.Log (setLogTarget)
+import GHC.Unit (UnitId)
+import Internal.Cache.Metadata (addHomeUnitTo, loadCachedUnits)
+import Internal.Log (logDebug, setLogTarget)
 import Internal.MakeFile (doMkDependHS)
 import Internal.Session (Env (..), runSession, withDynFlags)
 import Internal.State (WorkerState (..), updateMakeStateVar)
 import Internal.State.Make (insertUnitEnv, loadState, storeModuleGraph)
 import Internal.State.Stats (logMemStats)
-import Types.State (Target (..))
+import System.Directory (createDirectoryIfMissing)
+import Types.Args (Args (..))
+import Types.State (TargetSpec (..), UnitTarget (..))
 
 -- | 'doMkDependHS' needs this to be enabled.
 metadataTempSession :: HscEnv -> HscEnv
 metadataTempSession =
   hscUpdateFlags \ d -> d {ghcMode = MkDepend, targetWays_ = addWay WayDyn (targetWays_ d)}
 
-insertHomeUnit ::
-  UnitId ->
-  DynFlags ->
-  [UnitDatabase UnitId] ->
-  UnitState ->
-  HomeUnit ->
-  UnitEnv ->
-  UnitEnv
-insertHomeUnit unit dflags dbs unit_state home_unit unit_env =
-  (updateHug (unitEnv_insert unit hue) unit_env) {
-    ue_platform = targetPlatform dflags,
-    ue_namever = ghcNameVersion dflags
-  }
-  where
-    hue = HomeUnitEnv {
-      homeUnitEnv_units = unit_state,
-      homeUnitEnv_unit_dbs = Just dbs,
-      homeUnitEnv_dflags = dflags,
-      homeUnitEnv_hpt = emptyHomePackageTable,
-      homeUnitEnv_home_unit = Just home_unit
-    }
-
-initHomeUnit :: DynFlags -> Logger -> UnitId -> UnitEnv -> IO UnitEnv
-initHomeUnit dflags0 logger unit unit_env = do
-  (dbs, unit_state, home_unit, mconstants) <- initUnits logger dflags0 Nothing allUnitIds
-  dflags1 <- updatePlatformConstants dflags0 mconstants
-  pure (insertHomeUnit unit dflags1 dbs unit_state home_unit unit_env)
-  where
-    allUnitIds = unitEnv_keys (ue_home_unit_graph unit_env)
-
 -- | Add a new home unit to the current session using the provided 'DynFlags'.
 -- The flags have been constructed from Buck CLI args passed to the metadata step, which, crucially, contain the package
 -- DB arguments for dependencies.
 addHomeUnit :: DynFlags -> Ghc UnitId
 addHomeUnit dflags = do
-  modifySessionM \ hsc_env -> do
-    unit_env <- liftIO $ initHomeUnit dflags hsc_env.hsc_logger unit hsc_env.hsc_unit_env
-    pure hsc_env {hsc_unit_env = unit_env}
+  hsc_env <- getSession
+  (hsc_env1, unit) <- liftIO $ addHomeUnitTo hsc_env dflags
+  setSession hsc_env1
   pure unit
-  where
-    unit = dflags.homeUnitId_
 
 -- | Initialize the home unit env for this target and restore the module graphs computed previously for other units.
 --
@@ -107,14 +77,23 @@ writeMetadata srcs = do
 --
 -- Before downsweep, we also create a fresh @Finder@ to prevent 'doMkDependHS' from polluting the cache with entries
 -- with different compilation ways and restore the previous unit env so dependencies are visible.
-computeMetadata :: Env -> IO (Bool, Maybe Target)
+computeMetadata :: Env -> IO (Bool, Maybe TargetSpec)
 computeMetadata env = do
-  res <- runSession True env $ withDynFlags env \ dflags srcs -> do
-    unit <- prepareMetadataSession env dflags
-    let target = Target (unitIdString unit)
-    liftIO $ setLogTarget env.log target
-    module_graph <- writeMetadata (fst <$> srcs)
-    liftIO $ updateMakeStateVar env.state (storeModuleGraph module_graph)
-    pure (Just target)
+  res <- runMaybeT do
+    () <- MaybeT $ runSession True env \ _ -> do
+      dflags <- getSessionDynFlags
+      for_ env.args.cachedBuildPlans \ bp ->
+        withSession (liftIO . loadCachedUnits env.log env.state dflags bp)
+      pure (Just ())
+    MaybeT $ runSession True env $ withDynFlags env \ dflags srcs -> do
+      unit <- prepareMetadataSession env dflags
+      let target = TargetUnit (UnitTarget unit)
+      liftIO $ setLogTarget env.log target
+      module_graph <- writeMetadata (fst <$> srcs)
+      liftIO $ updateMakeStateVar env.state (storeModuleGraph module_graph)
+      for_ dflags.stubDir \ stubdir -> do
+        logDebug env.log ("Creating stubdir: " ++ stubdir)
+        liftIO $ createDirectoryIfMissing False stubdir
+      pure (Just target)
   logMemStats "after metadata" env.log
   pure (isJust res, res)

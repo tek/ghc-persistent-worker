@@ -6,7 +6,7 @@ import Brick.Widgets.List (GenericList, list, listElementsL, listSelectedElement
 import Data.Fixed (Fixed (..), Pico)
 import Data.Sequence qualified as Seq
 import Lens.Micro.Platform (modifying, preuse, use, (.=))
-import Types.State (Target (..))
+import Types.State (TargetSpec (..), renderTargetSpec)
 import UI.Types (Name (ModuleSelector), WorkerId, disabledAttr)
 import UI.Utils (formatPico, formatPs, popup, upsertAscSeq)
 
@@ -16,7 +16,7 @@ initialState :: State
 initialState = list ModuleSelector Seq.empty 1
 
 data Module = Module
-  { _modTarget :: Target
+  { _modTarget :: TargetSpec
   , _content :: String
   , _modCompileTime :: Maybe Pico
   , _fromWorker :: WorkerId
@@ -26,27 +26,26 @@ data Module = Module
 draw :: Name -> State -> Widget Name
 draw current = renderList drawModule (current == ModuleSelector)
  where
-  drawModule _ Module{_modTarget = Target name, ..} =
+  drawModule _ Module{_modTarget = name, ..} =
     (if _disabled then withAttr disabledAttr else id) $
-      padRight Max (str name) <+> str (maybe "" formatPico _modCompileTime)
+      padRight Max (str (renderTargetSpec name)) <+> str (maybe "" formatPico _modCompileTime)
 
 drawModuleDetails :: Module -> Widget Name
-drawModuleDetails Module{_modTarget = Target name, ..} =
-  popup 70 name $
+drawModuleDetails Module{_modTarget = name, ..} =
+  popup 70 (renderTargetSpec name) $
     vBox
       [ str $ "Compile time: " ++ maybe "" (formatPs . (\(MkFixed n) -> n)) _modCompileTime
       , strWrap _content
       ]
 
-addModule :: Target -> String -> Maybe Pico -> WorkerId -> EventM Name State ()
-addModule (Target "") _ _ _ = pure () -- TODO: Filter out earlier
+addModule :: TargetSpec -> String -> Maybe Pico -> WorkerId -> EventM Name State ()
 addModule target content compileTime wid = do
   mods <- use listElementsL
   let (i, mods') = upsertAscSeq _modTarget (Module target content compileTime wid False) mods
   listElementsL .= mods'
   modifying listSelectedL (Just . maybe i (\i' -> if i' >= i then i' + 1 else i'))
 
-getSelectedTarget :: EventM Name State (Maybe (WorkerId, Target))
+getSelectedTarget :: EventM Name State (Maybe (WorkerId, TargetSpec))
 getSelectedTarget = do
   mtask <- preuse listSelectedElementL
   modifying listSelectedElementL (\m -> m {_disabled = True})

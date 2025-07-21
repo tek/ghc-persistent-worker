@@ -14,11 +14,11 @@ import Network.GRPC.Client (Connection)
 import Network.GRPC.Common.Protobuf (Proto, (^.))
 import Proto.Instrument qualified as Instr
 import Proto.Instrument_Fields qualified as Instr
-import Types.State (Target (..))
 import UI.ActiveTasks qualified as ActiveTasks
 import UI.ModuleSelector qualified as ModuleSelector
 import UI.Types (Name, WorkerId)
 import UI.Utils (formatBytes, formatPs, stripEscSeqs)
+import Types.State (TargetSpec(..))
 
 newtype Id = Id {unId :: Text.Text}
   deriving stock (Eq, Ord, Show)
@@ -102,12 +102,12 @@ handleEvent (InstrEvent wid evt) =
   case evt ^. Instr.maybe'compileStart of
     Just cs -> do
       let canDebug = cs ^. Instr.canDebug
-      zoom activeTasks $ ActiveTasks.addTask (Target $ Text.unpack $ cs ^. Instr.target) wid canDebug
+      zoom activeTasks $ ActiveTasks.addTask (TargetUnknown $ Text.unpack $ cs ^. Instr.target) wid canDebug
     _ -> case evt ^. Instr.maybe'compileEnd of
       Just ce -> do
         let content = stripEscSeqs (Text.unpack $ ce ^. Instr.stderr)
             target' = Text.unpack $ ce ^. Instr.target
-            target = Target $ if target' == "" then takeWhile (/= ':') content else target'
+            target = TargetUnknown $ if target' == "" then takeWhile (/= ':') content else target'
         if ce ^. Instr.exitCode == 0
           then do
             start <- zoom activeTasks $ ActiveTasks.removeTask target

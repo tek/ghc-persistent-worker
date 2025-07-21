@@ -30,7 +30,7 @@ import GHC.Utils.Monad (MonadIO (..), unlessM)
 import GHC.Utils.Panic (panic, throwGhcExceptionIO)
 import Internal.State (ModuleArtifacts (..))
 import System.Directory (doesFileExist)
-import Types.State (Target (Target))
+import Types.State (Target (Target), TargetSpec (..))
 
 type P m = TPipelineClass TPhase m
 
@@ -92,7 +92,10 @@ compileFile hsc_env src = do
     pipe_env = mkPipeEnv NoStop offset_file Nothing output
     pipeline = pipelineOneshot pipe_env (setDumpPrefix pipe_env hsc_env) offset_file
 
-compileModuleWithDepsInEps :: Target -> Ghc (Maybe ModuleArtifacts)
-compileModuleWithDepsInEps (Target src) = do
-  hsc_env <- liftIO . initializePlugins =<< getSession
-  liftIO $ compileFile hsc_env src
+compileModuleWithDepsInEps :: TargetSpec -> Ghc (Maybe ModuleArtifacts)
+compileModuleWithDepsInEps = \case
+  TargetSource (Target src) -> do
+    hsc_env <- liftIO . initializePlugins =<< getSession
+    liftIO $ compileFile hsc_env src
+  TargetModule _ ->
+    liftIO $ throwGhcExceptionIO (CmdLineError "EPS worker does not support target specification as module")

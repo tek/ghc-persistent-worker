@@ -2,8 +2,20 @@
 
 module Internal.CompileHpt where
 
-import GHC (DynFlags (..), GeneralFlag (..), Ghc, GhcMonad (..), Logger, ModLocation (..), ModSummary (..), gopt)
-import GHC.Driver.Env (HscEnv (..), hscUpdateHUG)
+import Control.Concurrent (MVar)
+import GHC (
+  DynFlags (..),
+  GeneralFlag (..),
+  Ghc,
+  GhcMonad (..),
+  Logger,
+  ModLocation (..),
+  ModSummary (..),
+  Module,
+  gopt,
+  mgLookupModule,
+  )
+import GHC.Driver.Env (HscEnv (..), hscActiveUnitId, hscUpdateHUG)
 import GHC.Driver.Errors.Types (GhcMessage (..))
 import GHC.Driver.Make (summariseFile)
 import GHC.Driver.Monad (modifySession)
@@ -12,10 +24,12 @@ import GHC.Runtime.Loader (initializeSessionPlugins)
 import GHC.Unit.Env (addHomeModInfoToHug, ue_unsafeHomeUnit)
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Utils.Monad (MonadIO (..))
+import GHC.Utils.Outputable (ppr, showPprUnsafe, text, ($$), (<+>))
 import GHC.Utils.TmpFs (TmpFs, cleanCurrentModuleTempFiles, keepCurrentModuleTempFiles)
+import Internal.Error (eitherMessages, noteGhc)
+import Internal.Log (Log, logDebugD)
 import Internal.State (ModuleArtifacts (..))
-import Internal.Error (eitherMessages)
-import Types.State (Target (Target))
+import Types.State (ModuleTarget (..), Target (..), TargetSpec (..))
 
 -- | Insert a compilation result into the current unit's home package table, as it is done by upsweep.
 addDepsToHscEnv :: [HomeModInfo] -> HscEnv -> HscEnv
@@ -28,12 +42,40 @@ setHiLocation HscEnv {hsc_dflags = DynFlags {outputHi = Just ml_hi_file, outputF
   summ {ms_location = summ.ms_location {ml_hi_file, ml_obj_file}}
 setHiLocation _ summ = summ
 
--- | Not used yet.
 cleanCurrentModuleTempFilesMaybe :: MonadIO m => Logger -> TmpFs -> DynFlags -> m ()
 cleanCurrentModuleTempFilesMaybe logger tmpfs dflags =
   if gopt Opt_KeepTmpFiles dflags
     then liftIO $ keepCurrentModuleTempFiles logger tmpfs
     else liftIO $ cleanCurrentModuleTempFiles logger tmpfs
+
+-- | Find a module in the module graph and return its `ModSummary`.
+lookupSummary ::
+  HscEnv ->
+  Module ->
+  IO ModSummary
+lookupSummary hsc_env target = do
+  noteGhc notFound (mgLookupModule hsc_env.hsc_mod_graph target)
+  where
+    notFound = "Could not find ModSummary in the module graph for " ++ showPprUnsafe target
+
+-- | Obtain a `ModSummary` for the current target.
+-- If the target was specified by module name, we assume that the new workflow is used, in which the module graph is
+-- fully initialized in the metadata request, and look it up there.
+--
+-- Otherwise, the source file path is used to generate a fresh summary.
+ensureSummary ::
+  MVar Log ->
+  HscEnv ->
+  TargetSpec ->
+  IO ModSummary
+ensureSummary logVar hsc_env = \case
+  TargetModule (ModuleTarget m) -> do
+    logDebugD logVar ("Fetching ModSummary for" <+> ppr m <+> "from module graph")
+    lookupSummary hsc_env m
+  TargetSource (Target src) -> do
+    logDebugD logVar ("Computing fresh ModSummary for" <+> text src)
+    summResult <- summariseFile hsc_env (ue_unsafeHomeUnit (hsc_unit_env hsc_env)) mempty src Nothing Nothing
+    setHiLocation hsc_env <$> eitherMessages GhcDriverMessage summResult
 
 -- | Compile a module with multiple home units in the session state, using the home package table to look up
 -- dependencies.
@@ -48,14 +90,19 @@ cleanCurrentModuleTempFilesMaybe logger tmpfs dflags =
 -- - Call the module compilation function @compileOne@
 -- - Store the resulting @HomeModInfo@ in the current unit's home package table.
 compileModuleWithDepsInHpt ::
-  Target ->
+  MVar Log ->
+  TargetSpec ->
   Ghc (Maybe ModuleArtifacts)
-compileModuleWithDepsInHpt (Target src) = do
+compileModuleWithDepsInHpt logVar target = do
   initializeSessionPlugins
   hsc_env <- getSession
   hmi@HomeModInfo {hm_iface = iface, hm_linkable} <- liftIO do
-    summResult <- summariseFile hsc_env (ue_unsafeHomeUnit (hsc_unit_env hsc_env)) mempty src Nothing Nothing
-    summary <- setHiLocation hsc_env <$> eitherMessages GhcDriverMessage summResult
+    summary <- ensureSummary logVar hsc_env target
+    logDebugD logVar $
+      "Compiling" <+> ppr target $$
+      ppr summary.ms_location $$
+      "summary home unit:" <+> ppr summary.ms_hspp_opts.homeUnitId_ $$
+      "env home unit:" <+> ppr (hscActiveUnitId hsc_env)
     result <- compileOne hsc_env summary 1 100000 Nothing (HomeModLinkable Nothing Nothing)
     cleanCurrentModuleTempFilesMaybe (hsc_logger hsc_env) (hsc_tmpfs hsc_env) summary.ms_hspp_opts
     pure result

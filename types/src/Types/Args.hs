@@ -1,11 +1,23 @@
+{-# LANGUAGE NoFieldSelectors #-}
+
 module Types.Args where
 
 import Data.Map (Map)
 import Data.Map.Strict ((!?))
-import Types.CachedDeps (CachedDeps)
+import GHC (ModuleName)
+import GHC.Unit (UnitId)
+import GHC.Utils.Outputable (showPprUnsafe)
+import Types.CachedDeps (CachedBuildPlans, CachedDeps)
 
 newtype TargetId = TargetId {string :: String}
   deriving newtype (Show, Eq, Ord)
+
+newtype UnitName =
+  UnitName UnitId
+  deriving stock (Eq)
+
+instance Show UnitName where
+  show (UnitName uid) = showPprUnsafe uid
 
 data Args =
   Args {
@@ -13,8 +25,10 @@ data Args =
     workerTargetId :: Maybe TargetId,
     binPath :: [String],
     tempDir :: Maybe String,
-    ghcPath :: Maybe String,
+    unit :: Maybe UnitName,
+    moduleName :: Maybe ModuleName,
     ghcOptions :: [String],
+    cachedBuildPlans :: Maybe CachedBuildPlans,
     cachedDeps :: Maybe CachedDeps
   }
   deriving stock (Eq, Show)
@@ -26,7 +40,9 @@ emptyArgs env =
     workerTargetId = Nothing,
     binPath = [],
     tempDir = env !? "TMPDIR",
-    ghcPath = Nothing,
+    unit = Nothing,
+    moduleName = Nothing,
     ghcOptions = [],
+    cachedBuildPlans = Nothing,
     cachedDeps = Nothing
   }
