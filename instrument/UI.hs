@@ -2,6 +2,7 @@
 
 module UI (module UI, customMainWithDefaultVty) where
 
+import Brick (attrName)
 import Brick.AttrMap (attrMap)
 import Brick.Forms (Form, FormFieldState, editTextField, formState, handleFormEvent, newForm, renderForm, (@@=))
 import Brick.Main (App (..), customMainWithDefaultVty, getVtyHandle, halt, showFirstCursor, suspendAndResume')
@@ -209,6 +210,7 @@ app =
             , (listSelectedFocusedAttr, brightWhite `on` blue)
             , (disabledAttr, V.withStyle V.defAttr V.dim)
             , (canDebugAttr, V.withStyle V.defAttr V.bold)
+            , (attrName "headline", V.withStyle V.defAttr V.bold)
             ]
     , appChooseCursor = showFirstCursor
     }

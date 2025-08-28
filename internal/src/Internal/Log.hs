@@ -1,9 +1,10 @@
 module Internal.Log where
 
-import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar)
+import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, readMVar)
 import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString (ByteString)
+import Data.Foldable (for_)
 import Data.Text (pack)
 import Data.Text.Encoding (encodeUtf8)
 import GHC (Ghc, Severity (SevIgnore), noSrcSpan)
@@ -42,6 +43,7 @@ import System.FilePath (addExtension, takeDirectory, (</>))
 import System.IO (hPutStrLn, stderr)
 import System.IO.Error (tryIOError)
 import Types.State (TargetSpec (..), renderTargetSpec)
+import Control.Concurrent (threadDelay)
 
 -- | Simple log level that decides whether non-diagnostic messages will be sent to Buck in addition to basic file
 -- logging.
@@ -61,16 +63,29 @@ data Log =
     diagnostics :: [String],
     other :: [(String, LogLevel)],
     traceId :: Maybe TraceId,
-    target :: Maybe TargetSpec
+    target :: Maybe TargetSpec,
+    progress :: TargetSpec -> String -> String -> IO ()
   }
-  deriving stock (Eq, Show)
+
+newLogWithProgressHook ::
+  MonadIO m =>
+  (TargetSpec -> String -> String -> IO ()) ->
+  Maybe Double ->
+  Maybe TraceId ->
+  m (MVar Log)
+newLogWithProgressHook progress debugDelay traceId =
+  liftIO $ newMVar Log {diagnostics = [], other = [], traceId, target = Nothing, progress = maybe progress withDelay debugDelay}
+  where
+    withDelay delay t m i = do
+      progress t m i
+      threadDelay (round (delay * 1_000_000))
 
 newLog ::
   MonadIO m =>
   Maybe TraceId ->
   m (MVar Log)
-newLog traceId =
-  liftIO $ newMVar Log {diagnostics = [], other = [], traceId, target = Nothing}
+newLog =
+  newLogWithProgressHook (\ _ _ _ -> pure ()) Nothing
 
 -- | After the current request's target has been determined, the log state can be updated to generate more specific log
 -- file paths.
@@ -234,3 +249,34 @@ ghcLogd doc = do
           doc
       msgs = singleMessage (mkPlainMsgEnvelope diagOpts noSrcSpan msg)
   GHC.logDiagnostics (GhcDriverMessage <$> msgs)
+
+logProgress ::
+  MonadIO m =>
+  MVar Log ->
+  String ->
+  String ->
+  m ()
+logProgress logVar message info =
+  liftIO do
+    Log {progress, target} <- readMVar logVar
+    for_ target \ t -> progress t message info
+    logDebug logVar (message ++ " (" ++ info ++ ")")
+
+logProgressP ::
+  MonadIO m =>
+  Outputable a =>
+  MVar Log ->
+  String ->
+  a ->
+  m ()
+logProgressP logVar message info =
+  logProgress logVar message (showPprUnsafe info)
+
+logProgressD ::
+  MonadIO m =>
+  MVar Log ->
+  String ->
+  SDoc ->
+  m ()
+logProgressD =
+  logProgressP

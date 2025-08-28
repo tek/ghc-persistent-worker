@@ -12,7 +12,7 @@ import GHC.Platform.Ways (Way (WayDyn), addWay)
 import GHC.Runtime.Loader (initializeSessionPlugins)
 import GHC.Unit (UnitId)
 import Internal.Cache.Metadata (addHomeUnitTo, loadCachedUnits)
-import Internal.Log (logDebug, setLogTarget)
+import Internal.Log (logDebug)
 import Internal.MakeFile (doMkDependHS)
 import Internal.Session (Env (..), runSession, withDynFlags)
 import Internal.State (WorkerState (..), updateMakeStateVar)
@@ -88,7 +88,6 @@ computeMetadata env = do
     MaybeT $ runSession True env $ withDynFlags env \ dflags srcs -> do
       unit <- prepareMetadataSession env dflags
       let target = TargetUnit (UnitTarget unit)
-      liftIO $ setLogTarget env.log target
       module_graph <- writeMetadata (fst <$> srcs)
       liftIO $ updateMakeStateVar env.state (storeModuleGraph module_graph)
       for_ dflags.stubDir \ stubdir -> do

@@ -18,9 +18,8 @@ import GHC.Unit (GenHomeUnit (..), GenWithIsBoot (..), HomeUnit, UnitDatabase, U
 import GHC.Unit.Env (HomeUnitEnv (..), UnitEnv (..), unitEnv_insert, unitEnv_keys, unitEnv_member, updateHug)
 import GHC.Unit.Home.ModInfo (emptyHomePackageTable)
 import GHC.Unit.Module.Graph (ModuleGraphNode (..), NodeKey (..))
-import GHC.Utils.Outputable (ppr, quotes, text, (<+>))
 import Internal.Error (eitherMessages, notePpr)
-import Internal.Log (Log, logDebugD)
+import Internal.Log (Log, logProgressP)
 import Internal.Session (buckLocation, parseFlags)
 import Internal.State (WorkerState (..), modifyMakeState)
 import Internal.State.Make (MakeState (..), insertUnitEnv, storeModuleGraph)
@@ -99,7 +98,7 @@ loadCachedUnit logVar hsc_env0 dflags0 unit file = do
   maybe (pure hsc_env0) (load build_plan) unit_args
   where
     load module_graph args_file = do
-      logDebugD logVar (text "Loading cached unit" <+> quotes (ppr unit))
+      logProgressP logVar "Loading cached dependency unit" unit
       hsc_env2 <- liftIO do
         args <- readFile args_file
         (dflags1, _, _, _) <- parseFlags dflags0 hsc_env0.hsc_logger (buckLocation <$> lines args)
@@ -129,5 +128,5 @@ loadCachedUnits logVar stateVar dflags0 (CachedBuildPlans buildPlans) hsc_env0 =
       else loadCachedUnit logVar hsc_env dflags0 uid planFile
 
     skipPresent hsc_env uid = do
-      logDebugD logVar (text "Present in the unit env:" <+> quotes (ppr uid))
+      logProgressP logVar "Dependency already in the unit env" uid
       pure hsc_env

@@ -124,7 +124,11 @@ handleEvent (InstrEvent wid evt) =
               , _gc_cpu_ns = fromIntegral $ msg ^. Instr.gcCpuNs
               , _cpu_ns = fromIntegral $ msg ^. Instr.cpuNs
               }
-        _ -> pure ()
+        _ -> case evt ^. Instr.maybe'progress of
+          Just progress -> do
+            let target = TargetUnknown (Text.unpack progress.target)
+            zoom activeTasks $ ActiveTasks.updateProgress target progress.progressMessage progress.progressInfo
+          Nothing -> pure ()
 
 removeWorker :: WorkerId -> EventM Name State ()
 removeWorker wid = do

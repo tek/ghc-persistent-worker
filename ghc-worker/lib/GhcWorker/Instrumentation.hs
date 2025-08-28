@@ -33,7 +33,9 @@ data Hooks =
 
     -- | A module compilation has finished.
     -- If the job was successful, the argument contains 'Just' the stderr lines and the exit code, otherwise 'Nothing'.
-    compileFinish :: Maybe (Maybe TargetSpec, [String], Int32) -> IO ()
+    compileFinish :: Maybe (Maybe TargetSpec, [String], Int32) -> IO (),
+
+    progress :: TargetSpec -> String -> String -> IO ()
   }
 
 -- | Dummy implementation of 'Hooks'.
@@ -41,7 +43,8 @@ hooksNoop :: Hooks
 hooksNoop =
   Hooks {
     compileStart = const (const (pure ())),
-    compileFinish = const (pure ())
+    compileFinish = const (pure ()),
+    progress = \ _ _ _ -> pure ()
   }
 
 -- | A request handler that is aware of instrumentation.
@@ -83,6 +86,14 @@ messageCompileEnd target exitCode err =
     & Instr.exitCode .~ fromIntegral exitCode
     & Instr.stderr .~ Text.pack err
 
+-- | Construct a grapesy message for a "progress" event.
+messageProgress :: String -> String -> String -> Proto Instr.Progress
+messageProgress target progressMessage progressInfo =
+  defMessage
+    & Instr.target .~ Text.pack target
+    & Instr.progressMessage .~ Text.pack progressMessage
+    & Instr.progressInfo .~ Text.pack progressInfo
+
 -- | Run a 'GrpcHandler' with instrumentation enabled.
 --
 -- This consists of adapting the active job count and sending messages to the gRPC client running the instrumentation
@@ -106,7 +117,8 @@ withInstrumentation instrChan status stateVar handler =
   where
     hooks = Hooks {
       compileStart,
-      compileFinish
+      compileFinish,
+      progress
     }
 
     compileStart =
@@ -124,6 +136,12 @@ withInstrumentation instrChan status stateVar handler =
           defMessage &
             Instr.compileEnd .~
               messageCompileEnd tgt (fromIntegral exitCode) (unlines output)
+
+    progress target progressMessage progressInfo =
+      writeChan instrChan $
+        defMessage &
+          Instr.progress .~
+            messageProgress (renderTargetSpec target) progressMessage progressInfo
 
 -- | Construct a 'GrpcHandler' by passing functioning 'Hooks' to an 'InstrumentedHandler' if the third argument contains
 -- 'Just' a message channel, or passing no-op 'Hooks' otherwise.

@@ -1,7 +1,7 @@
 module GhcWorker.Run where
 
 import BuckWorker (Instrument, Worker)
-import Common.Grpc (fromGrpcHandler, GrpcHandler(..))
+import Common.Grpc (GrpcHandler (..), fromGrpcHandler)
 import Control.Concurrent (MVar, newChan, newMVar)
 import Control.Concurrent.Chan (Chan)
 import Control.Concurrent.STM (TVar, newTVarIO)
@@ -18,6 +18,7 @@ import Network.GRPC.Common.Protobuf (Proto)
 import Network.GRPC.Server.Protobuf (ProtobufMethodsOf)
 import Network.GRPC.Server.StreamType (Methods)
 import qualified Proto.Instrument as Instr
+import Text.Read (readMaybe)
 import Types.GhcHandler (WorkerMode (..))
 import Types.Grpc (CommandEnv, RequestArgs)
 import Types.Orchestration (ServerSocketPath (..), serverSocketFromPath)
@@ -32,7 +33,9 @@ data CliOptions =
     -- | If this is given, the app should start a GHC server synchronously, listening on the given path.
     serve :: ServerSocketPath,
 
-    instrument :: FeatureInstrument
+    instrument :: FeatureInstrument,
+
+    debugDelay :: Maybe Double
   }
   deriving stock (Eq, Show)
 
@@ -41,7 +44,8 @@ defaultCliOptions =
   CliOptions {
     workerMode = WorkerOneshotMode,
     serve = ServerSocketPath "" "" "",
-    instrument = FeatureInstrument False
+    instrument = FeatureInstrument False,
+    debugDelay = Nothing
   }
 
 parseOptions :: [String] -> IO CliOptions
@@ -53,6 +57,11 @@ parseOptions =
       "--make" : rest -> spin z {workerMode = WorkerMakeMode} rest
       "--serve" : socket : rest -> spin z {serve = serverSocketFromPath socket} rest
       "--instrument" : rest -> spin z {instrument = FeatureInstrument True} rest
+      "--debug-delay" : spec : rest -> do
+        seconds <- case readMaybe spec of
+          Just seconds -> pure seconds
+          Nothing -> throwIO (userError ("Invalid number for --debug-delay: " ++ spec))
+        spin z {debugDelay = Just seconds} rest
       arg -> throwIO (userError ("Invalid worker CLI args: " ++ unwords arg))
 
 -- | Allocate a communication channel for instrumentation events and construct a gRPC server handler that streams said
@@ -75,17 +84,18 @@ createGhcMethods ::
   FeatureInstrument ->
   MVar WorkerStatus ->
   Maybe TraceId ->
+  Maybe Double ->
   Maybe (Chan (Proto Instr.Event)) ->
   IO (CommandEnv -> RequestArgs -> IO (), Methods IO (ProtobufMethodsOf Worker))
-createGhcMethods lock state workerMode instrument status traceId instrChan =
-  let handler = toGrpcHandler (ghcHandler lock state workerMode instrument traceId) status state instrChan
+createGhcMethods lock state workerMode instrument status traceId debugDelay instrChan =
+  let handler = toGrpcHandler (ghcHandler lock state workerMode instrument traceId debugDelay) status state instrChan
       voidRun commandEnv requestArgs =
         void $ handler.run commandEnv requestArgs
   in pure (voidRun, fromGrpcHandler handler)
 
 -- | Main function for running the default persistent worker using the provided server socket path and CLI options.
 runWorker :: CliOptions -> IO ()
-runWorker CliOptions {workerMode, serve, instrument} = do
+runWorker CliOptions {workerMode, serve, instrument, debugDelay} = do
   state <-
     case workerMode of
       WorkerMakeMode ->
@@ -102,7 +112,7 @@ runWorker CliOptions {workerMode, serve, instrument} = do
   let
     methods = CreateMethods {
       createInstrumentation = createInstrumentMethods state,
-      createGhc = createGhcMethods lock state workerMode instrument status traceId
+      createGhc = createGhcMethods lock state workerMode instrument status traceId debugDelay
     }
   runCentralGhcSpawned methods instrument serve
   where

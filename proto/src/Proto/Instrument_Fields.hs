@@ -102,6 +102,12 @@ maybe'halt ::
    Data.ProtoLens.Field.HasField s "maybe'halt" a) =>
   Lens.Family2.LensLike' f s a
 maybe'halt = Data.ProtoLens.Field.field @"maybe'halt"
+maybe'progress ::
+  forall f s a.
+  (Prelude.Functor f,
+   Data.ProtoLens.Field.HasField s "maybe'progress" a) =>
+  Lens.Family2.LensLike' f s a
+maybe'progress = Data.ProtoLens.Field.field @"maybe'progress"
 maybe'stats ::
   forall f s a.
   (Prelude.Functor f,
@@ -113,6 +119,24 @@ memory ::
   (Prelude.Functor f, Data.ProtoLens.Field.HasField s "memory" a) =>
   Lens.Family2.LensLike' f s a
 memory = Data.ProtoLens.Field.field @"memory"
+progress ::
+  forall f s a.
+  (Prelude.Functor f,
+   Data.ProtoLens.Field.HasField s "progress" a) =>
+  Lens.Family2.LensLike' f s a
+progress = Data.ProtoLens.Field.field @"progress"
+progressInfo ::
+  forall f s a.
+  (Prelude.Functor f,
+   Data.ProtoLens.Field.HasField s "progressInfo" a) =>
+  Lens.Family2.LensLike' f s a
+progressInfo = Data.ProtoLens.Field.field @"progressInfo"
+progressMessage ::
+  forall f s a.
+  (Prelude.Functor f,
+   Data.ProtoLens.Field.HasField s "progressMessage" a) =>
+  Lens.Family2.LensLike' f s a
+progressMessage = Data.ProtoLens.Field.field @"progressMessage"
 stats ::
   forall f s a.
   (Prelude.Functor f, Data.ProtoLens.Field.HasField s "stats" a) =>

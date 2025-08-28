@@ -25,11 +25,11 @@ import GHC.Unit (Definite (..), GenUnit (..))
 import GHC.Unit.Env (UnitEnv (..), unitEnv_member)
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Unit.Module.ModDetails (ModDetails (..))
-import GHC.Utils.Outputable (ppr, ($+$))
 import GHC.Unit.Module.WholeCoreBindings (WholeCoreBindings (..))
 import GHC.Utils.Misc (modificationTimeIfExists)
+import GHC.Utils.Outputable (ppr, text, ($+$), (<+>))
 import GHC.Utils.Panic (throwGhcExceptionIO)
-import Internal.Log (Log (..), logDebug)
+import Internal.Log (Log (..), logProgressD, logProgressP)
 import Prelude hiding (log)
 import Types.CachedDeps (
   CachedDeps (..),
@@ -102,7 +102,7 @@ loadCachedDep log name hsc_env ifaceFile =
   else loadHmi
   where
     loadHmi = do
-      logDebug log ("Loading HPT module from cache: " ++ ifaceFile)
+      logProgressP log "Loading module from cache" name
       hm_iface <- loadIface
       hm_details <- initModDetails hsc_env hm_iface
       homeMod_bytecode <- loadCachedByteCode hsc_env ifaceFile hm_iface hm_details
@@ -157,7 +157,9 @@ loadCachedDeps log CachedDeps {home_unit, project} hsc_env0 = do
       then loadActiveUnit (hscSetActiveUnitId uid hsc_env) (cachedProjectDepInterface <$> toList mods)
       else pure hsc_env
 
-    loadActiveUnit = foldM loadDep
+    loadActiveUnit hsc_env ifaces = do
+      logProgressD log "Ensuring presence of dep interfaces" (text "unit:" <+> ppr (hscActiveUnitId hsc_env))
+      foldM loadDep hsc_env ifaces
 
     loadDep hsc_env CachedInterface {name = JsonFs name, interfaces = iface :| _} =
       liftIO (loadCachedDep log name hsc_env iface)

@@ -87,6 +87,7 @@
         ipeOverrides
         (envOverrides args.config)
       ];
+      buildInputs = pkgs: [pkgs.grpc-tools build.envs.dev.toolchain.packages.proto-lens-protoc];
     };
 
     envs.ipe = args: {
@@ -171,7 +172,7 @@
 
     commands.hls.env = "hls-db";
 
-    output.extraPackages = ["ghc-debug-brick" "eventlog2html" "hp2pretty" "ghc-events"];
+    output.extraPackages = ["ghc-debug-brick" "eventlog2html" "hp2pretty" "ghc-events" "proto-lens-protoc"];
 
     commands.comparison-1 = buckTest "comparison1";
     commands.comparison-2 = buckTest "comparison2";
@@ -306,6 +307,7 @@
             "containers"
             "ghc-debug-brick"
             "directory"
+            "filepath"
             "fsnotify"
             "grapesy"
             "microlens-platform"

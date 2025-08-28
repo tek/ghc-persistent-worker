@@ -15,8 +15,8 @@ import GHC (
   gopt,
   mgLookupModule,
   )
-import GHC.Driver.Env (HscEnv (..), hscActiveUnitId, hscUpdateHUG)
 import GHC.Driver.DynFlags (gopt_set)
+import GHC.Driver.Env (HscEnv (..), hscUpdateHUG)
 import GHC.Driver.Errors.Types (GhcMessage (..))
 import GHC.Driver.Make (summariseFile)
 import GHC.Driver.Monad (modifySession)
@@ -25,10 +25,10 @@ import GHC.Runtime.Loader (initializeSessionPlugins)
 import GHC.Unit.Env (addHomeModInfoToHug, ue_unsafeHomeUnit)
 import GHC.Unit.Home.ModInfo (HomeModInfo (..), HomeModLinkable (..))
 import GHC.Utils.Monad (MonadIO (..))
-import GHC.Utils.Outputable (ppr, showPprUnsafe, text, ($$), (<+>))
+import GHC.Utils.Outputable (ppr, showPprUnsafe, text)
 import GHC.Utils.TmpFs (TmpFs, cleanCurrentModuleTempFiles, keepCurrentModuleTempFiles)
 import Internal.Error (eitherMessages, noteGhc)
-import Internal.Log (Log, logDebugD)
+import Internal.Log (Log, logProgressD, logProgressP)
 import Internal.State (ModuleArtifacts (..))
 import Types.State (ModuleTarget (..), Target (..), TargetSpec (..))
 
@@ -71,10 +71,10 @@ ensureSummary ::
   IO ModSummary
 ensureSummary logVar hsc_env = \case
   TargetModule (ModuleTarget m) -> do
-    logDebugD logVar ("Fetching ModSummary for" <+> ppr m <+> "from module graph")
+    logProgressP logVar "Fetching ModSummary from module graph" m
     lookupSummary hsc_env m
   TargetSource (Target src) -> do
-    logDebugD logVar ("Computing fresh ModSummary for" <+> text src)
+    logProgressD logVar "Computing fresh ModSummary" (text src)
     summResult <- summariseFile hsc_env (ue_unsafeHomeUnit (hsc_unit_env hsc_env)) mempty src Nothing Nothing
     setHiLocation hsc_env <$> eitherMessages GhcDriverMessage summResult
 
@@ -104,10 +104,13 @@ compileModuleWithDepsInHpt logVar target = do
       ppr summary.ms_location $$
       "summary home unit:" <+> ppr summary.ms_hspp_opts.homeUnitId_ $$
       "env home unit:" <+> ppr (hscActiveUnitId hsc_env)
+    logProgressD logVar "Compiling" ""
     result <- compileOne hsc_env (forceRecomp summary) 1 100000 Nothing (HomeModLinkable Nothing Nothing)
     cleanCurrentModuleTempFilesMaybe (hsc_logger hsc_env) (hsc_tmpfs hsc_env) summary.ms_hspp_opts
     pure result
+  logProgressD logVar "Adding HomeModInfo to HPT" ""
   modifySession (addDepsToHscEnv [hmi])
+  logProgressD logVar "Done" ""
   pure (Just ModuleArtifacts {iface, bytecode = homeMod_bytecode hm_linkable})
   where
     -- This bypasses another recompilation check in 'compileOne'

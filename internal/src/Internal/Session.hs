@@ -47,7 +47,7 @@ import GHC.Utils.Panic (panic, throwGhcExceptionIO)
 import GHC.Utils.TmpFs (TempDir (..), cleanTempDirs, cleanTempFiles, initTmpFs)
 import Internal.Cache.Hpt (loadCachedDeps)
 import Internal.Error (handleExceptions)
-import Internal.Log (Log (..), logDebugD, logToState)
+import Internal.Log (Log (..), logDebugD, logProgress, logToState, setLogTarget)
 import Internal.State (BinPath (..), ModuleArtifacts, Options (..), WorkerState (..), withCacheMake, withCacheOneshot)
 import Internal.State.Oneshot (OneshotCacheFeatures (..), OneshotState (..))
 import Prelude hiding (log)
@@ -349,35 +349,33 @@ moduleTarget args = do
   pure (ModuleTarget (mkModule (RealUnit (Definite uid)) name))
 
 withGhcUsingCacheForModule ::
-  (TargetSpec -> Ghc a -> Ghc (Maybe b)) ->
+  TargetSpec ->
+  (Ghc a -> Ghc (Maybe b)) ->
   Env ->
-  (TargetSpec -> Ghc a) ->
+  Ghc a ->
   IO (Maybe b)
-withGhcUsingCacheForModule cacheHandler env prog =
-  maybe legacy withModule (moduleTarget env.args)
-  where
-    withModule target = do
-      logDebugD env.log (text "Compiling module target" <+> ppr target)
-      runSession True env $ withGhcInSession env \case
-        [] -> do
-          let spec = TargetModule target
-          cacheHandler spec do
-            initializeSessionPlugins
-            prog spec
-        srcs ->
-          liftIO $
-          throwGhcExceptionIO (PprProgramError "Extraneous arguments for GHC in module graph mode" (text (unwords (fst <$> srcs))))
+withGhcUsingCacheForModule target cacheHandler env prog = do
+  setLogTarget env.log target
+  logDebugD env.log (text "Compiling module target" <+> ppr target)
+  logProgress env.log "Initializing session" ""
+  runSession True env $ withGhcInSession env \case
+    [] -> do
+      cacheHandler do
+        initializeSessionPlugins
+        prog
+    srcs ->
+      liftIO $
+      throwGhcExceptionIO (PprProgramError "Extraneous arguments for GHC in module graph mode" (text (unwords (fst <$> srcs))))
 
-    legacy =
-      withGhcUsingCacheMhu (cacheHandler . TargetSource) env \ _ target -> do
-        logDebugD env.log (text "Compiling source target " <+> ppr target)
-        prog (TargetSource target)
-
-withGhcForModule :: Env -> (TargetSpec -> Ghc (Maybe a)) -> IO (Maybe a)
-withGhcForModule env f =
-  withGhcUsingCacheForModule cacheHandler env f
+withGhcForModule ::
+  TargetSpec ->
+  Env ->
+  Ghc (Maybe a) ->
+  IO (Maybe a)
+withGhcForModule target env f =
+  withGhcUsingCacheForModule target cacheHandler env f
   where
-    cacheHandler target prog = do
+    cacheHandler prog = do
       result <- withCacheMake env.log env.state do
         case target of
           TargetModule t ->

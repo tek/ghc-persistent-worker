@@ -6,8 +6,8 @@
 module Proto.Instrument (
         Instrument(..), CompileEnd(), CompileStart(), Empty(), Event(),
         Event'Event(..), _Event'Halt, _Event'CompileStart,
-        _Event'CompileEnd, _Event'Stats, Options(), RebuildRequest(),
-        Stats(), Stats'MemoryEntry()
+        _Event'CompileEnd, _Event'Stats, _Event'Progress, Options(),
+        Progress(), RebuildRequest(), Stats(), Stats'MemoryEntry()
     ) where
 import qualified Control.DeepSeq
 import qualified Data.ProtoLens.Prism
@@ -456,7 +456,9 @@ instance Control.DeepSeq.NFData Empty where
          * 'Proto.Instrument_Fields.maybe'compileEnd' @:: Lens' Event (Prelude.Maybe CompileEnd)@
          * 'Proto.Instrument_Fields.compileEnd' @:: Lens' Event CompileEnd@
          * 'Proto.Instrument_Fields.maybe'stats' @:: Lens' Event (Prelude.Maybe Stats)@
-         * 'Proto.Instrument_Fields.stats' @:: Lens' Event Stats@ -}
+         * 'Proto.Instrument_Fields.stats' @:: Lens' Event Stats@
+         * 'Proto.Instrument_Fields.maybe'progress' @:: Lens' Event (Prelude.Maybe Progress)@
+         * 'Proto.Instrument_Fields.progress' @:: Lens' Event Progress@ -}
 data Event
   = Event'_constructor {_Event'event :: !(Prelude.Maybe Event'Event),
                         _Event'_unknownFields :: !Data.ProtoLens.FieldSet}
@@ -471,7 +473,8 @@ data Event'Event
   = Event'Halt !Empty |
     Event'CompileStart !CompileStart |
     Event'CompileEnd !CompileEnd |
-    Event'Stats !Stats
+    Event'Stats !Stats |
+    Event'Progress !Progress
   deriving stock (Prelude.Show, Prelude.Eq, Prelude.Ord)
 instance Data.ProtoLens.Field.HasField Event "maybe'event" (Prelude.Maybe Event'Event) where
   fieldOf _
@@ -575,6 +578,30 @@ instance Data.ProtoLens.Field.HasField Event "stats" Stats where
                       _otherwise -> Prelude.Nothing)
               (\ _ y__ -> Prelude.fmap Event'Stats y__))
            (Data.ProtoLens.maybeLens Data.ProtoLens.defMessage))
+instance Data.ProtoLens.Field.HasField Event "maybe'progress" (Prelude.Maybe Progress) where
+  fieldOf _
+    = (Prelude..)
+        (Lens.Family2.Unchecked.lens
+           _Event'event (\ x__ y__ -> x__ {_Event'event = y__}))
+        (Lens.Family2.Unchecked.lens
+           (\ x__
+              -> case x__ of
+                   (Prelude.Just (Event'Progress x__val)) -> Prelude.Just x__val
+                   _otherwise -> Prelude.Nothing)
+           (\ _ y__ -> Prelude.fmap Event'Progress y__))
+instance Data.ProtoLens.Field.HasField Event "progress" Progress where
+  fieldOf _
+    = (Prelude..)
+        (Lens.Family2.Unchecked.lens
+           _Event'event (\ x__ y__ -> x__ {_Event'event = y__}))
+        ((Prelude..)
+           (Lens.Family2.Unchecked.lens
+              (\ x__
+                 -> case x__ of
+                      (Prelude.Just (Event'Progress x__val)) -> Prelude.Just x__val
+                      _otherwise -> Prelude.Nothing)
+              (\ _ y__ -> Prelude.fmap Event'Progress y__))
+           (Data.ProtoLens.maybeLens Data.ProtoLens.defMessage))
 instance Data.ProtoLens.Message Event where
   messageName _ = Data.Text.pack "instrument.Event"
   packedMessageDescriptor _
@@ -585,7 +612,8 @@ instance Data.ProtoLens.Message Event where
       \\n\
       \compileEnd\CAN\ETX \SOH(\v2\SYN.instrument.CompileEndH\NULR\n\
       \compileEnd\DC2)\n\
-      \\ENQstats\CAN\EOT \SOH(\v2\DC1.instrument.StatsH\NULR\ENQstatsB\a\n\
+      \\ENQstats\CAN\EOT \SOH(\v2\DC1.instrument.StatsH\NULR\ENQstats\DC22\n\
+      \\bprogress\CAN\ENQ \SOH(\v2\DC4.instrument.ProgressH\NULR\bprogressB\a\n\
       \\ENQevent"
   packedFileDescriptor _ = packedFileDescriptor
   fieldsByTag
@@ -622,12 +650,21 @@ instance Data.ProtoLens.Message Event where
               (Data.ProtoLens.OptionalField
                  (Data.ProtoLens.Field.field @"maybe'stats")) ::
               Data.ProtoLens.FieldDescriptor Event
+        progress__field_descriptor
+          = Data.ProtoLens.FieldDescriptor
+              "progress"
+              (Data.ProtoLens.MessageField Data.ProtoLens.MessageType ::
+                 Data.ProtoLens.FieldTypeDescriptor Progress)
+              (Data.ProtoLens.OptionalField
+                 (Data.ProtoLens.Field.field @"maybe'progress")) ::
+              Data.ProtoLens.FieldDescriptor Event
       in
         Data.Map.fromList
           [(Data.ProtoLens.Tag 1, halt__field_descriptor),
            (Data.ProtoLens.Tag 2, compileStart__field_descriptor),
            (Data.ProtoLens.Tag 3, compileEnd__field_descriptor),
-           (Data.ProtoLens.Tag 4, stats__field_descriptor)]
+           (Data.ProtoLens.Tag 4, stats__field_descriptor),
+           (Data.ProtoLens.Tag 5, progress__field_descriptor)]
   unknownFields
     = Lens.Family2.Unchecked.lens
         _Event'_unknownFields
@@ -687,6 +724,14 @@ instance Data.ProtoLens.Message Event where
                                              (Prelude.fromIntegral len) Data.ProtoLens.parseMessage)
                                        "stats"
                                 loop (Lens.Family2.set (Data.ProtoLens.Field.field @"stats") y x)
+                        42
+                          -> do y <- (Data.ProtoLens.Encoding.Bytes.<?>)
+                                       (do len <- Data.ProtoLens.Encoding.Bytes.getVarInt
+                                           Data.ProtoLens.Encoding.Bytes.isolate
+                                             (Prelude.fromIntegral len) Data.ProtoLens.parseMessage)
+                                       "progress"
+                                loop
+                                  (Lens.Family2.set (Data.ProtoLens.Field.field @"progress") y x)
                         wire
                           -> do !y <- Data.ProtoLens.Encoding.Wire.parseTaggedValueFromWire
                                         wire
@@ -742,6 +787,16 @@ instance Data.ProtoLens.Message Event where
                                   (Data.ProtoLens.Encoding.Bytes.putVarInt
                                      (Prelude.fromIntegral (Data.ByteString.length bs)))
                                   (Data.ProtoLens.Encoding.Bytes.putBytes bs))
+                          Data.ProtoLens.encodeMessage v)
+                (Prelude.Just (Event'Progress v))
+                  -> (Data.Monoid.<>)
+                       (Data.ProtoLens.Encoding.Bytes.putVarInt 42)
+                       ((Prelude..)
+                          (\ bs
+                             -> (Data.Monoid.<>)
+                                  (Data.ProtoLens.Encoding.Bytes.putVarInt
+                                     (Prelude.fromIntegral (Data.ByteString.length bs)))
+                                  (Data.ProtoLens.Encoding.Bytes.putBytes bs))
                           Data.ProtoLens.encodeMessage v))
              (Data.ProtoLens.Encoding.Wire.buildFieldSet
                 (Lens.Family2.view Data.ProtoLens.unknownFields _x))
@@ -756,6 +811,7 @@ instance Control.DeepSeq.NFData Event'Event where
   rnf (Event'CompileStart x__) = Control.DeepSeq.rnf x__
   rnf (Event'CompileEnd x__) = Control.DeepSeq.rnf x__
   rnf (Event'Stats x__) = Control.DeepSeq.rnf x__
+  rnf (Event'Progress x__) = Control.DeepSeq.rnf x__
 _Event'Halt :: Data.ProtoLens.Prism.Prism' Event'Event Empty
 _Event'Halt
   = Data.ProtoLens.Prism.prism'
@@ -789,6 +845,14 @@ _Event'Stats
       (\ p__
          -> case p__ of
               (Event'Stats p__val) -> Prelude.Just p__val
+              _otherwise -> Prelude.Nothing)
+_Event'Progress :: Data.ProtoLens.Prism.Prism' Event'Event Progress
+_Event'Progress
+  = Data.ProtoLens.Prism.prism'
+      Event'Progress
+      (\ p__
+         -> case p__ of
+              (Event'Progress p__val) -> Prelude.Just p__val
               _otherwise -> Prelude.Nothing)
 {- | Fields :
      
@@ -906,6 +970,215 @@ instance Control.DeepSeq.NFData Options where
         -> Control.DeepSeq.deepseq
              (_Options'_unknownFields x__)
              (Control.DeepSeq.deepseq (_Options'extraGhcOptions x__) ())
+{- | Fields :
+     
+         * 'Proto.Instrument_Fields.target' @:: Lens' Progress Data.Text.Text@
+         * 'Proto.Instrument_Fields.progressMessage' @:: Lens' Progress Data.Text.Text@
+         * 'Proto.Instrument_Fields.progressInfo' @:: Lens' Progress Data.Text.Text@ -}
+data Progress
+  = Progress'_constructor {_Progress'target :: !Data.Text.Text,
+                           _Progress'progressMessage :: !Data.Text.Text,
+                           _Progress'progressInfo :: !Data.Text.Text,
+                           _Progress'_unknownFields :: !Data.ProtoLens.FieldSet}
+  deriving stock (Prelude.Eq, Prelude.Ord)
+instance Prelude.Show Progress where
+  showsPrec _ __x __s
+    = Prelude.showChar
+        '{'
+        (Prelude.showString
+           (Data.ProtoLens.showMessageShort __x) (Prelude.showChar '}' __s))
+instance Data.ProtoLens.Field.HasField Progress "target" Data.Text.Text where
+  fieldOf _
+    = (Prelude..)
+        (Lens.Family2.Unchecked.lens
+           _Progress'target (\ x__ y__ -> x__ {_Progress'target = y__}))
+        Prelude.id
+instance Data.ProtoLens.Field.HasField Progress "progressMessage" Data.Text.Text where
+  fieldOf _
+    = (Prelude..)
+        (Lens.Family2.Unchecked.lens
+           _Progress'progressMessage
+           (\ x__ y__ -> x__ {_Progress'progressMessage = y__}))
+        Prelude.id
+instance Data.ProtoLens.Field.HasField Progress "progressInfo" Data.Text.Text where
+  fieldOf _
+    = (Prelude..)
+        (Lens.Family2.Unchecked.lens
+           _Progress'progressInfo
+           (\ x__ y__ -> x__ {_Progress'progressInfo = y__}))
+        Prelude.id
+instance Data.ProtoLens.Message Progress where
+  messageName _ = Data.Text.pack "instrument.Progress"
+  packedMessageDescriptor _
+    = "\n\
+      \\bProgress\DC2\SYN\n\
+      \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget\DC2(\n\
+      \\SIprogressMessage\CAN\STX \SOH(\tR\SIprogressMessage\DC2\"\n\
+      \\fprogressInfo\CAN\ETX \SOH(\tR\fprogressInfo"
+  packedFileDescriptor _ = packedFileDescriptor
+  fieldsByTag
+    = let
+        target__field_descriptor
+          = Data.ProtoLens.FieldDescriptor
+              "target"
+              (Data.ProtoLens.ScalarField Data.ProtoLens.StringField ::
+                 Data.ProtoLens.FieldTypeDescriptor Data.Text.Text)
+              (Data.ProtoLens.PlainField
+                 Data.ProtoLens.Optional (Data.ProtoLens.Field.field @"target")) ::
+              Data.ProtoLens.FieldDescriptor Progress
+        progressMessage__field_descriptor
+          = Data.ProtoLens.FieldDescriptor
+              "progressMessage"
+              (Data.ProtoLens.ScalarField Data.ProtoLens.StringField ::
+                 Data.ProtoLens.FieldTypeDescriptor Data.Text.Text)
+              (Data.ProtoLens.PlainField
+                 Data.ProtoLens.Optional
+                 (Data.ProtoLens.Field.field @"progressMessage")) ::
+              Data.ProtoLens.FieldDescriptor Progress
+        progressInfo__field_descriptor
+          = Data.ProtoLens.FieldDescriptor
+              "progressInfo"
+              (Data.ProtoLens.ScalarField Data.ProtoLens.StringField ::
+                 Data.ProtoLens.FieldTypeDescriptor Data.Text.Text)
+              (Data.ProtoLens.PlainField
+                 Data.ProtoLens.Optional
+                 (Data.ProtoLens.Field.field @"progressInfo")) ::
+              Data.ProtoLens.FieldDescriptor Progress
+      in
+        Data.Map.fromList
+          [(Data.ProtoLens.Tag 1, target__field_descriptor),
+           (Data.ProtoLens.Tag 2, progressMessage__field_descriptor),
+           (Data.ProtoLens.Tag 3, progressInfo__field_descriptor)]
+  unknownFields
+    = Lens.Family2.Unchecked.lens
+        _Progress'_unknownFields
+        (\ x__ y__ -> x__ {_Progress'_unknownFields = y__})
+  defMessage
+    = Progress'_constructor
+        {_Progress'target = Data.ProtoLens.fieldDefault,
+         _Progress'progressMessage = Data.ProtoLens.fieldDefault,
+         _Progress'progressInfo = Data.ProtoLens.fieldDefault,
+         _Progress'_unknownFields = []}
+  parseMessage
+    = let
+        loop :: Progress -> Data.ProtoLens.Encoding.Bytes.Parser Progress
+        loop x
+          = do end <- Data.ProtoLens.Encoding.Bytes.atEnd
+               if end then
+                   do (let missing = []
+                       in
+                         if Prelude.null missing then
+                             Prelude.return ()
+                         else
+                             Prelude.fail
+                               ((Prelude.++)
+                                  "Missing required fields: "
+                                  (Prelude.show (missing :: [Prelude.String]))))
+                      Prelude.return
+                        (Lens.Family2.over
+                           Data.ProtoLens.unknownFields (\ !t -> Prelude.reverse t) x)
+               else
+                   do tag <- Data.ProtoLens.Encoding.Bytes.getVarInt
+                      case tag of
+                        10
+                          -> do y <- (Data.ProtoLens.Encoding.Bytes.<?>)
+                                       (do len <- Data.ProtoLens.Encoding.Bytes.getVarInt
+                                           Data.ProtoLens.Encoding.Bytes.getText
+                                             (Prelude.fromIntegral len))
+                                       "target"
+                                loop (Lens.Family2.set (Data.ProtoLens.Field.field @"target") y x)
+                        18
+                          -> do y <- (Data.ProtoLens.Encoding.Bytes.<?>)
+                                       (do len <- Data.ProtoLens.Encoding.Bytes.getVarInt
+                                           Data.ProtoLens.Encoding.Bytes.getText
+                                             (Prelude.fromIntegral len))
+                                       "progressMessage"
+                                loop
+                                  (Lens.Family2.set
+                                     (Data.ProtoLens.Field.field @"progressMessage") y x)
+                        26
+                          -> do y <- (Data.ProtoLens.Encoding.Bytes.<?>)
+                                       (do len <- Data.ProtoLens.Encoding.Bytes.getVarInt
+                                           Data.ProtoLens.Encoding.Bytes.getText
+                                             (Prelude.fromIntegral len))
+                                       "progressInfo"
+                                loop
+                                  (Lens.Family2.set
+                                     (Data.ProtoLens.Field.field @"progressInfo") y x)
+                        wire
+                          -> do !y <- Data.ProtoLens.Encoding.Wire.parseTaggedValueFromWire
+                                        wire
+                                loop
+                                  (Lens.Family2.over
+                                     Data.ProtoLens.unknownFields (\ !t -> (:) y t) x)
+      in
+        (Data.ProtoLens.Encoding.Bytes.<?>)
+          (do loop Data.ProtoLens.defMessage) "Progress"
+  buildMessage
+    = \ _x
+        -> (Data.Monoid.<>)
+             (let
+                _v = Lens.Family2.view (Data.ProtoLens.Field.field @"target") _x
+              in
+                if (Prelude.==) _v Data.ProtoLens.fieldDefault then
+                    Data.Monoid.mempty
+                else
+                    (Data.Monoid.<>)
+                      (Data.ProtoLens.Encoding.Bytes.putVarInt 10)
+                      ((Prelude..)
+                         (\ bs
+                            -> (Data.Monoid.<>)
+                                 (Data.ProtoLens.Encoding.Bytes.putVarInt
+                                    (Prelude.fromIntegral (Data.ByteString.length bs)))
+                                 (Data.ProtoLens.Encoding.Bytes.putBytes bs))
+                         Data.Text.Encoding.encodeUtf8 _v))
+             ((Data.Monoid.<>)
+                (let
+                   _v
+                     = Lens.Family2.view
+                         (Data.ProtoLens.Field.field @"progressMessage") _x
+                 in
+                   if (Prelude.==) _v Data.ProtoLens.fieldDefault then
+                       Data.Monoid.mempty
+                   else
+                       (Data.Monoid.<>)
+                         (Data.ProtoLens.Encoding.Bytes.putVarInt 18)
+                         ((Prelude..)
+                            (\ bs
+                               -> (Data.Monoid.<>)
+                                    (Data.ProtoLens.Encoding.Bytes.putVarInt
+                                       (Prelude.fromIntegral (Data.ByteString.length bs)))
+                                    (Data.ProtoLens.Encoding.Bytes.putBytes bs))
+                            Data.Text.Encoding.encodeUtf8 _v))
+                ((Data.Monoid.<>)
+                   (let
+                      _v
+                        = Lens.Family2.view (Data.ProtoLens.Field.field @"progressInfo") _x
+                    in
+                      if (Prelude.==) _v Data.ProtoLens.fieldDefault then
+                          Data.Monoid.mempty
+                      else
+                          (Data.Monoid.<>)
+                            (Data.ProtoLens.Encoding.Bytes.putVarInt 26)
+                            ((Prelude..)
+                               (\ bs
+                                  -> (Data.Monoid.<>)
+                                       (Data.ProtoLens.Encoding.Bytes.putVarInt
+                                          (Prelude.fromIntegral (Data.ByteString.length bs)))
+                                       (Data.ProtoLens.Encoding.Bytes.putBytes bs))
+                               Data.Text.Encoding.encodeUtf8 _v))
+                   (Data.ProtoLens.Encoding.Wire.buildFieldSet
+                      (Lens.Family2.view Data.ProtoLens.unknownFields _x))))
+instance Control.DeepSeq.NFData Progress where
+  rnf
+    = \ x__
+        -> Control.DeepSeq.deepseq
+             (_Progress'_unknownFields x__)
+             (Control.DeepSeq.deepseq
+                (_Progress'target x__)
+                (Control.DeepSeq.deepseq
+                   (_Progress'progressMessage x__)
+                   (Control.DeepSeq.deepseq (_Progress'progressInfo x__) ())))
 {- | Fields :
      
          * 'Proto.Instrument_Fields.target' @:: Lens' RebuildRequest Data.Text.Text@ -}
@@ -1420,21 +1693,26 @@ packedFileDescriptor
     \CompileEnd\DC2\SYN\n\
     \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget\DC2\ESC\n\
     \\texit_code\CAN\STX \SOH(\ENQR\bexitCode\DC2\SYN\n\
-    \\ACKstderr\CAN\ETX \SOH(\tR\ACKstderr\"\172\SOH\n\
+    \\ACKstderr\CAN\ETX \SOH(\tR\ACKstderr\"p\n\
+    \\bProgress\DC2\SYN\n\
+    \\ACKtarget\CAN\SOH \SOH(\tR\ACKtarget\DC2(\n\
+    \\SIprogressMessage\CAN\STX \SOH(\tR\SIprogressMessage\DC2\"\n\
+    \\fprogressInfo\CAN\ETX \SOH(\tR\fprogressInfo\"\172\SOH\n\
     \\ENQStats\DC25\n\
     \\ACKmemory\CAN\SOH \ETX(\v2\GS.instrument.Stats.MemoryEntryR\ACKmemory\DC2\SUB\n\
     \\tgc_cpu_ns\CAN\STX \SOH(\ETXR\agcCpuNs\DC2\NAK\n\
     \\ACKcpu_ns\CAN\ETX \SOH(\ETXR\ENQcpuNs\SUB9\n\
     \\vMemoryEntry\DC2\DLE\n\
     \\ETXkey\CAN\SOH \SOH(\tR\ETXkey\DC2\DC4\n\
-    \\ENQvalue\CAN\STX \SOH(\ETXR\ENQvalue:\STX8\SOH\"\222\SOH\n\
+    \\ENQvalue\CAN\STX \SOH(\ETXR\ENQvalue:\STX8\SOH\"\146\STX\n\
     \\ENQEvent\DC2'\n\
     \\EOThalt\CAN\SOH \SOH(\v2\DC1.instrument.EmptyH\NULR\EOThalt\DC2>\n\
     \\fcompileStart\CAN\STX \SOH(\v2\CAN.instrument.CompileStartH\NULR\fcompileStart\DC28\n\
     \\n\
     \compileEnd\CAN\ETX \SOH(\v2\SYN.instrument.CompileEndH\NULR\n\
     \compileEnd\DC2)\n\
-    \\ENQstats\CAN\EOT \SOH(\v2\DC1.instrument.StatsH\NULR\ENQstatsB\a\n\
+    \\ENQstats\CAN\EOT \SOH(\v2\DC1.instrument.StatsH\NULR\ENQstats\DC22\n\
+    \\bprogress\CAN\ENQ \SOH(\v2\DC4.instrument.ProgressH\NULR\bprogressB\a\n\
     \\ENQevent\"5\n\
     \\aOptions\DC2*\n\
     \\DC1extra_ghc_options\CAN\SOH \SOH(\tR\SIextraGhcOptions\"(\n\
@@ -1445,8 +1723,8 @@ packedFileDescriptor
     \\bNotifyMe\DC2\DC1.instrument.Empty\SUB\DC1.instrument.Event\"\NUL0\SOH\DC26\n\
     \\n\
     \SetOptions\DC2\DC3.instrument.Options\SUB\DC1.instrument.Empty\"\NUL\DC2A\n\
-    \\SOTriggerRebuild\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NULJ\172\t\n\
-    \\ACK\DC2\EOT\NUL\NUL,\SOH\n\
+    \\SOTriggerRebuild\DC2\SUB.instrument.RebuildRequest\SUB\DC1.instrument.Empty\"\NULJ\160\v\n\
+    \\ACK\DC2\EOT\NUL\NUL3\SOH\n\
     \\b\n\
     \\SOH\f\DC2\ETX\NUL\NUL\DC2\n\
     \\b\n\
@@ -1513,132 +1791,170 @@ packedFileDescriptor
     \\STX\EOT\ETX\DC2\EOT\DC1\NUL\NAK\SOH\n\
     \\n\
     \\n\
-    \\ETX\EOT\ETX\SOH\DC2\ETX\DC1\b\r\n\
+    \\ETX\EOT\ETX\SOH\DC2\ETX\DC1\b\DLE\n\
     \\v\n\
-    \\EOT\EOT\ETX\STX\NUL\DC2\ETX\DC2\STX \n\
+    \\EOT\EOT\ETX\STX\NUL\DC2\ETX\DC2\STX\DC4\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\NUL\ACK\DC2\ETX\DC2\STX\DC4\n\
+    \\ENQ\EOT\ETX\STX\NUL\ENQ\DC2\ETX\DC2\STX\b\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\NUL\SOH\DC2\ETX\DC2\NAK\ESC\n\
+    \\ENQ\EOT\ETX\STX\NUL\SOH\DC2\ETX\DC2\t\SI\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\NUL\ETX\DC2\ETX\DC2\RS\US\n\
+    \\ENQ\EOT\ETX\STX\NUL\ETX\DC2\ETX\DC2\DC2\DC3\n\
     \\v\n\
-    \\EOT\EOT\ETX\STX\SOH\DC2\ETX\DC3\STX\SYN\n\
+    \\EOT\EOT\ETX\STX\SOH\DC2\ETX\DC3\STX\GS\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\SOH\ENQ\DC2\ETX\DC3\STX\a\n\
+    \\ENQ\EOT\ETX\STX\SOH\ENQ\DC2\ETX\DC3\STX\b\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\SOH\SOH\DC2\ETX\DC3\b\DC1\n\
+    \\ENQ\EOT\ETX\STX\SOH\SOH\DC2\ETX\DC3\t\CAN\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\SOH\ETX\DC2\ETX\DC3\DC4\NAK\n\
+    \\ENQ\EOT\ETX\STX\SOH\ETX\DC2\ETX\DC3\ESC\FS\n\
     \\v\n\
-    \\EOT\EOT\ETX\STX\STX\DC2\ETX\DC4\STX\DC3\n\
+    \\EOT\EOT\ETX\STX\STX\DC2\ETX\DC4\STX\SUB\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\STX\ENQ\DC2\ETX\DC4\STX\a\n\
+    \\ENQ\EOT\ETX\STX\STX\ENQ\DC2\ETX\DC4\STX\b\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\STX\SOH\DC2\ETX\DC4\b\SO\n\
+    \\ENQ\EOT\ETX\STX\STX\SOH\DC2\ETX\DC4\t\NAK\n\
     \\f\n\
-    \\ENQ\EOT\ETX\STX\STX\ETX\DC2\ETX\DC4\DC1\DC2\n\
+    \\ENQ\EOT\ETX\STX\STX\ETX\DC2\ETX\DC4\CAN\EM\n\
     \\n\
     \\n\
-    \\STX\EOT\EOT\DC2\EOT\ETB\NUL\RS\SOH\n\
+    \\STX\EOT\EOT\DC2\EOT\ETB\NUL\ESC\SOH\n\
     \\n\
     \\n\
     \\ETX\EOT\EOT\SOH\DC2\ETX\ETB\b\r\n\
-    \\f\n\
-    \\EOT\EOT\EOT\b\NUL\DC2\EOT\CAN\STX\GS\ETX\n\
-    \\f\n\
-    \\ENQ\EOT\EOT\b\NUL\SOH\DC2\ETX\CAN\b\r\n\
     \\v\n\
-    \\EOT\EOT\EOT\STX\NUL\DC2\ETX\EM\EOT\DC3\n\
+    \\EOT\EOT\EOT\STX\NUL\DC2\ETX\CAN\STX \n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\NUL\ACK\DC2\ETX\EM\EOT\t\n\
+    \\ENQ\EOT\EOT\STX\NUL\ACK\DC2\ETX\CAN\STX\DC4\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\NUL\SOH\DC2\ETX\EM\n\
+    \\ENQ\EOT\EOT\STX\NUL\SOH\DC2\ETX\CAN\NAK\ESC\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\NUL\ETX\DC2\ETX\CAN\RS\US\n\
+    \\v\n\
+    \\EOT\EOT\EOT\STX\SOH\DC2\ETX\EM\STX\SYN\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\SOH\ENQ\DC2\ETX\EM\STX\a\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\SOH\SOH\DC2\ETX\EM\b\DC1\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\SOH\ETX\DC2\ETX\EM\DC4\NAK\n\
+    \\v\n\
+    \\EOT\EOT\EOT\STX\STX\DC2\ETX\SUB\STX\DC3\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\STX\ENQ\DC2\ETX\SUB\STX\a\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\STX\SOH\DC2\ETX\SUB\b\SO\n\
+    \\f\n\
+    \\ENQ\EOT\EOT\STX\STX\ETX\DC2\ETX\SUB\DC1\DC2\n\
+    \\n\
+    \\n\
+    \\STX\EOT\ENQ\DC2\EOT\GS\NUL%\SOH\n\
+    \\n\
+    \\n\
+    \\ETX\EOT\ENQ\SOH\DC2\ETX\GS\b\r\n\
+    \\f\n\
+    \\EOT\EOT\ENQ\b\NUL\DC2\EOT\RS\STX$\ETX\n\
+    \\f\n\
+    \\ENQ\EOT\ENQ\b\NUL\SOH\DC2\ETX\RS\b\r\n\
+    \\v\n\
+    \\EOT\EOT\ENQ\STX\NUL\DC2\ETX\US\EOT\DC3\n\
+    \\f\n\
+    \\ENQ\EOT\ENQ\STX\NUL\ACK\DC2\ETX\US\EOT\t\n\
+    \\f\n\
+    \\ENQ\EOT\ENQ\STX\NUL\SOH\DC2\ETX\US\n\
     \\SO\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\NUL\ETX\DC2\ETX\EM\DC1\DC2\n\
+    \\ENQ\EOT\ENQ\STX\NUL\ETX\DC2\ETX\US\DC1\DC2\n\
     \\v\n\
-    \\EOT\EOT\EOT\STX\SOH\DC2\ETX\SUB\EOT\"\n\
+    \\EOT\EOT\ENQ\STX\SOH\DC2\ETX \EOT\"\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\SOH\ACK\DC2\ETX\SUB\EOT\DLE\n\
+    \\ENQ\EOT\ENQ\STX\SOH\ACK\DC2\ETX \EOT\DLE\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\SOH\SOH\DC2\ETX\SUB\DC1\GS\n\
+    \\ENQ\EOT\ENQ\STX\SOH\SOH\DC2\ETX \DC1\GS\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\SOH\ETX\DC2\ETX\SUB !\n\
+    \\ENQ\EOT\ENQ\STX\SOH\ETX\DC2\ETX  !\n\
     \\v\n\
-    \\EOT\EOT\EOT\STX\STX\DC2\ETX\ESC\EOT\RS\n\
+    \\EOT\EOT\ENQ\STX\STX\DC2\ETX!\EOT\RS\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\STX\ACK\DC2\ETX\ESC\EOT\SO\n\
+    \\ENQ\EOT\ENQ\STX\STX\ACK\DC2\ETX!\EOT\SO\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\STX\SOH\DC2\ETX\ESC\SI\EM\n\
+    \\ENQ\EOT\ENQ\STX\STX\SOH\DC2\ETX!\SI\EM\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\STX\ETX\DC2\ETX\ESC\FS\GS\n\
+    \\ENQ\EOT\ENQ\STX\STX\ETX\DC2\ETX!\FS\GS\n\
     \\v\n\
-    \\EOT\EOT\EOT\STX\ETX\DC2\ETX\FS\EOT\DC4\n\
+    \\EOT\EOT\ENQ\STX\ETX\DC2\ETX\"\EOT\DC4\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\ETX\ACK\DC2\ETX\FS\EOT\t\n\
+    \\ENQ\EOT\ENQ\STX\ETX\ACK\DC2\ETX\"\EOT\t\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\ETX\SOH\DC2\ETX\FS\n\
+    \\ENQ\EOT\ENQ\STX\ETX\SOH\DC2\ETX\"\n\
     \\SI\n\
     \\f\n\
-    \\ENQ\EOT\EOT\STX\ETX\ETX\DC2\ETX\FS\DC2\DC3\n\
-    \\n\
-    \\n\
-    \\STX\EOT\ENQ\DC2\EOT \NUL\"\SOH\n\
-    \\n\
-    \\n\
-    \\ETX\EOT\ENQ\SOH\DC2\ETX \b\SI\n\
+    \\ENQ\EOT\ENQ\STX\ETX\ETX\DC2\ETX\"\DC2\DC3\n\
     \\v\n\
-    \\EOT\EOT\ENQ\STX\NUL\DC2\ETX!\STX\US\n\
+    \\EOT\EOT\ENQ\STX\EOT\DC2\ETX#\EOT\SUB\n\
     \\f\n\
-    \\ENQ\EOT\ENQ\STX\NUL\ENQ\DC2\ETX!\STX\b\n\
+    \\ENQ\EOT\ENQ\STX\EOT\ACK\DC2\ETX#\EOT\f\n\
     \\f\n\
-    \\ENQ\EOT\ENQ\STX\NUL\SOH\DC2\ETX!\t\SUB\n\
+    \\ENQ\EOT\ENQ\STX\EOT\SOH\DC2\ETX#\r\NAK\n\
     \\f\n\
-    \\ENQ\EOT\ENQ\STX\NUL\ETX\DC2\ETX!\GS\RS\n\
+    \\ENQ\EOT\ENQ\STX\EOT\ETX\DC2\ETX#\CAN\EM\n\
     \\n\
     \\n\
-    \\STX\EOT\ACK\DC2\EOT$\NUL&\SOH\n\
+    \\STX\EOT\ACK\DC2\EOT'\NUL)\SOH\n\
     \\n\
     \\n\
-    \\ETX\EOT\ACK\SOH\DC2\ETX$\b\SYN\n\
+    \\ETX\EOT\ACK\SOH\DC2\ETX'\b\SI\n\
     \\v\n\
-    \\EOT\EOT\ACK\STX\NUL\DC2\ETX%\STX\DC4\n\
+    \\EOT\EOT\ACK\STX\NUL\DC2\ETX(\STX\US\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\NUL\ENQ\DC2\ETX%\STX\b\n\
+    \\ENQ\EOT\ACK\STX\NUL\ENQ\DC2\ETX(\STX\b\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\NUL\SOH\DC2\ETX%\t\SI\n\
+    \\ENQ\EOT\ACK\STX\NUL\SOH\DC2\ETX(\t\SUB\n\
     \\f\n\
-    \\ENQ\EOT\ACK\STX\NUL\ETX\DC2\ETX%\DC2\DC3\n\
+    \\ENQ\EOT\ACK\STX\NUL\ETX\DC2\ETX(\GS\RS\n\
     \\n\
     \\n\
-    \\STX\ACK\NUL\DC2\EOT(\NUL,\SOH\n\
+    \\STX\EOT\a\DC2\EOT+\NUL-\SOH\n\
     \\n\
     \\n\
-    \\ETX\ACK\NUL\SOH\DC2\ETX(\b\DC2\n\
+    \\ETX\EOT\a\SOH\DC2\ETX+\b\SYN\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\NUL\DC2\ETX)\STX/\n\
+    \\EOT\EOT\a\STX\NUL\DC2\ETX,\STX\DC4\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX)\ACK\SO\n\
+    \\ENQ\EOT\a\STX\NUL\ENQ\DC2\ETX,\STX\b\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX)\SI\DC4\n\
+    \\ENQ\EOT\a\STX\NUL\SOH\DC2\ETX,\t\SI\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\ACK\DC2\ETX)\US%\n\
-    \\f\n\
-    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX)&+\n\
+    \\ENQ\EOT\a\STX\NUL\ETX\DC2\ETX,\DC2\DC3\n\
+    \\n\
+    \\n\
+    \\STX\ACK\NUL\DC2\EOT/\NUL3\SOH\n\
+    \\n\
+    \\n\
+    \\ETX\ACK\NUL\SOH\DC2\ETX/\b\DC2\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\SOH\DC2\ETX*\STX,\n\
+    \\EOT\ACK\NUL\STX\NUL\DC2\ETX0\STX/\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX*\ACK\DLE\n\
+    \\ENQ\ACK\NUL\STX\NUL\SOH\DC2\ETX0\ACK\SO\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX*\DC1\CAN\n\
+    \\ENQ\ACK\NUL\STX\NUL\STX\DC2\ETX0\SI\DC4\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX*#(\n\
+    \\ENQ\ACK\NUL\STX\NUL\ACK\DC2\ETX0\US%\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\NUL\ETX\DC2\ETX0&+\n\
     \\v\n\
-    \\EOT\ACK\NUL\STX\STX\DC2\ETX+\STX7\n\
+    \\EOT\ACK\NUL\STX\SOH\DC2\ETX1\STX,\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\STX\SOH\DC2\ETX+\ACK\DC4\n\
+    \\ENQ\ACK\NUL\STX\SOH\SOH\DC2\ETX1\ACK\DLE\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\STX\STX\DC2\ETX+\NAK#\n\
+    \\ENQ\ACK\NUL\STX\SOH\STX\DC2\ETX1\DC1\CAN\n\
     \\f\n\
-    \\ENQ\ACK\NUL\STX\STX\ETX\DC2\ETX+.3b\ACKproto3"
+    \\ENQ\ACK\NUL\STX\SOH\ETX\DC2\ETX1#(\n\
+    \\v\n\
+    \\EOT\ACK\NUL\STX\STX\DC2\ETX2\STX7\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\STX\SOH\DC2\ETX2\ACK\DC4\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\STX\STX\DC2\ETX2\NAK#\n\
+    \\f\n\
+    \\ENQ\ACK\NUL\STX\STX\ETX\DC2\ETX2.3b\ACKproto3"

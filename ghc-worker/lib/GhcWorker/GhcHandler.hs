@@ -1,12 +1,13 @@
 module GhcWorker.GhcHandler where
 
 import Common.Grpc (GrpcHandler (..))
-import Control.Concurrent (MVar, forkIO, threadDelay, modifyMVar_)
+import Control.Concurrent (MVar, forkIO, modifyMVar_, threadDelay)
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', readTVar, retry, writeTVar)
 import Control.Exception (throwIO, try)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Coerce (coerce)
+import Data.Foldable (for_)
 import Data.Functor ((<&>))
 import Data.Int (Int32)
 import Data.Map qualified as Map
@@ -14,7 +15,7 @@ import GHC (DynFlags (..), Ghc, getSession)
 import GHC.Debug.Stub (withGhcDebugUnix)
 import GHC.Driver.DynFlags (GhcMode (..))
 import GHC.Driver.Env (hscUpdateFlags)
-import GHC.Driver.Monad (modifySession, reifyGhc, reflectGhc)
+import GHC.Driver.Monad (modifySession, reflectGhc, reifyGhc)
 import GhcWorker.CompileResult (CompileResult (..), writeCloseOutput, writeResult)
 import GhcWorker.Instrumentation (Hooks (..), InstrumentedHandler (..))
 import GhcWorker.Orchestration (FeatureInstrument (..))
@@ -22,18 +23,21 @@ import Internal.AbiHash (AbiHash (..), showAbiHash)
 import Internal.Compile (compileModuleWithDepsInEps)
 import Internal.CompileHpt (compileModuleWithDepsInHpt)
 import Internal.Debug (debugSocketPath)
-import Internal.Log (Log, TraceId, dbg, logDebug, logFlush, newLog, setLogTarget)
+import Internal.Log (Log, TraceId, dbg, logDebug, logFlush, newLogWithProgressHook, setLogTarget)
 import Internal.Metadata (computeMetadata)
-import Internal.Session (Env (..), withGhc, withGhcForModule)
+import Internal.Session (Env (..), moduleTarget, withGhc, withGhcForModule, withGhcMhu)
 import Internal.State (ModuleArtifacts (..), WorkerState (..), dumpState)
 import Prelude hiding (log)
 import System.Exit (ExitCode (ExitSuccess))
 import System.Posix.Process (exitImmediately)
+import Types.Args (Args (..))
 import qualified Types.BuckArgs
 import Types.BuckArgs (BuckArgs, Mode (..), parseBuckArgs, toGhcArgs)
 import Types.GhcHandler (WorkerMode (..))
 import Types.Grpc (RequestArgs (..))
 import Types.State (TargetSpec (..))
+import Types.Args (UnitName(..))
+import Types.State (UnitTarget(..))
 
 data LockState = LockStart | LockFreeze Int | LockThaw Int | LockEnd
   deriving stock (Eq, Show)
@@ -59,15 +63,12 @@ withLock maxLock lock action = do
 -- make-style implementation.
 compileAndReadAbiHash ::
   GhcMode ->
-  (TargetSpec -> Ghc (Maybe ModuleArtifacts)) ->
-  Hooks ->
+  Ghc (Maybe ModuleArtifacts) ->
   BuckArgs ->
-  TargetSpec ->
   Ghc (Maybe CompileResult)
-compileAndReadAbiHash ghcMode compile hooks args target = do
-  liftIO $ hooks.compileStart args (Just target)
+compileAndReadAbiHash ghcMode compile args = do
   modifySession $ hscUpdateFlags \ d -> d {ghcMode}
-  compile target >>= traverse \ artifacts -> do
+  compile >>= traverse \ artifacts -> do
     hsc_env <- getSession
     let
       abiHash :: Maybe AbiHash
@@ -97,6 +98,10 @@ dispatch _ workerMode hooks env args targetCallback =
         pure (code, result)
       pure (code, snd <$> result)
     Just ModeMetadata -> do
+      for_ env.args.unit \ (UnitName unit) -> do
+        let target = TargetUnit (UnitTarget unit)
+        setLogTarget env.log target
+        liftIO $ hooks.compileStart args (Just target)
       (success, target) <- computeMetadata env
       pure (if success then 0 else 1, target)
     Just ModeClose -> do
@@ -113,13 +118,25 @@ dispatch _ workerMode hooks env args targetCallback =
   where
     compile = case workerMode of
       WorkerOneshotMode ->
-        withGhc env (withTarget (compileAndReadAbiHash OneShot compileModuleWithDepsInEps hooks args) . TargetSource)
+        withGhc env \ target -> do
+          let spec = TargetSource target
+          liftIO $ hooks.compileStart args (Just spec)
+          withTarget (\ _ -> compileAndReadAbiHash OneShot (compileModuleWithDepsInEps spec) args) spec
       WorkerMakeMode -> do
         logDebug env.log "dispatching make mode"
-        withGhcForModule env $
-          withTarget (compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log) hooks args)
+        case moduleTarget env.args of
+          Just mtarget -> do
+            let target = TargetModule mtarget
+            liftIO $ hooks.compileStart args (Just target)
+            withGhcForModule target env $
+              withTarget (\ _ -> compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log target) args) target
+          Nothing ->
+            withGhcMhu env \ _ target -> do
+              let spec = TargetSource target
+              liftIO $ hooks.compileStart args (Just spec)
+              withTarget (\ _ -> compileAndReadAbiHash CompManager (compileModuleWithDepsInHpt env.log spec) args) spec
 
-    withTarget f (target :: TargetSpec) =
+    withTarget f target =
       reifyGhc $ \session -> do
         setLogTarget env.log target
         instrument <- targetCallback target
@@ -164,10 +181,11 @@ ghcHandler ::
   WorkerMode ->
   FeatureInstrument ->
   Maybe TraceId ->
+  Maybe Double ->
   InstrumentedHandler
-ghcHandler lock state workerMode instrument traceId =
+ghcHandler lock state workerMode instrument traceId debugDelay =
   InstrumentedHandler \ hooks -> GrpcHandler \ commandEnv argv -> do
-    log <- newLog traceId
+    log <- newLogWithProgressHook hooks.progress debugDelay traceId
     result <- try do
       buckArgs <- either parseError pure (parseBuckArgs commandEnv argv)
       args <- toGhcArgs buckArgs
