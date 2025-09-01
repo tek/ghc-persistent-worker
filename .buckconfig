@@ -14,7 +14,7 @@ fbcode_macros = none
 buck = none
 
 [external_cells]
-prelude = git
+# prelude = git
 
 [external_cell_prelude]
 git_origin = https://github.com/MercuryTechnologies/buck2-prelude.git
