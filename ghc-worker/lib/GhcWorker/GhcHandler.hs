@@ -25,14 +25,14 @@ import Internal.Debug (debugSocketPath)
 import Internal.Log (dbg, logFlush, newLogger)
 import Internal.Metadata (computeMetadata)
 import Internal.Session (withGhcMakeModule, withGhcMakeSource, withGhcOneshotSource)
-import Internal.State (ModuleArtifacts (..), dumpState)
+import Internal.State (ModuleArtifacts (..), dumpState, modifyMakeState)
 import Prelude hiding (log)
 import System.Exit (ExitCode (ExitSuccess))
 import System.Posix.Process (exitImmediately)
 import Types.Args (Args (..))
-import Types.Env (Env (..))
 import qualified Types.BuckArgs
-import Types.BuckArgs (BuckArgs, Mode (..), parseBuckArgs, toGhcArgs)
+import Types.BuckArgs (BuckArgs, Mode (..), parseBuckArgs, toGhcArgsWithPathCache)
+import Types.Env (Env (..))
 import Types.GhcHandler (WorkerMode (..))
 import Types.Grpc (RequestArgs (..))
 import Types.Log (Logger (..), TraceId, newLog)
@@ -178,7 +178,7 @@ ghcHandler lock state workerMode instrument traceId =
     log <- newLogger <$> newLog traceId
     result <- try do
       buckArgs <- either parseError pure (parseBuckArgs commandEnv argv)
-      args <- toGhcArgs buckArgs
+      args <- modifyMakeState state (toGhcArgsWithPathCache buckArgs)
       log.debug (unlines (coerce argv))
       let env = Env {log, state, args}
       dispatch lock workerMode hooks env buckArgs $ \ target -> do

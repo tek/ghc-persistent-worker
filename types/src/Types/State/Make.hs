@@ -1,5 +1,6 @@
 module Types.State.Make where
 
+import Data.Map (Map)
 import GHC (ModuleGraph)
 import GHC.Runtime.Interpreter (Interp)
 import GHC.Unit.Env (HomeUnitGraph)
@@ -24,5 +25,7 @@ data MakeState =
     -- | While the interpreter state contains a mutable variable that would be shared across sessions, it isn't
     -- initialized properly until the first module compilation's flags have been parsed, so we store it in the shared
     -- state for consistency.
-    interp :: Maybe Interp
+    interp :: Maybe Interp,
+
+    packageDbPaths :: Map FilePath FilePath
   }

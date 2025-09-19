@@ -53,7 +53,8 @@ newStateWith features = do
     make = MakeState {
       moduleGraph = emptyMG,
       hug = unitEnv_new mempty,
-      interp = Nothing
+      interp = Nothing,
+      packageDbPaths = mempty
     },
     oneshot,
     targetArgs = mempty

@@ -12,9 +12,10 @@ import Data.Maybe (fromMaybe, isJust)
 import GHC (mkModule, mkModuleName)
 import GHC.Unit (Definite (..), GenUnit (RealUnit), stringToUnitId)
 import System.FilePath (takeDirectory)
-import qualified Types.Args
+import qualified Types.Args as Args
 import Types.Args (Args (Args), TargetId (..), UnitName (..))
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
+import Types.State.Make (MakeState (..))
 import Types.Target (ModuleTarget (..))
 
 data Mode =
@@ -215,3 +216,20 @@ toGhcArgs args = do
   where
     packageDbArg path = ["-package-db", path]
     readPath = fmap (fmap (dropWhileEnd ('\n' ==))) . traverse readFile
+
+toGhcArgsWithPathCache :: BuckArgs -> MakeState -> IO (MakeState, Args)
+toGhcArgsWithPathCache buckArgs state@MakeState {packageDbPaths} = do
+  args <- toGhcArgs buckArgs
+  let (newPaths, newGhcOptions) = retainPaths (packageDbPaths, []) args.ghcOptions
+  pure (state {packageDbPaths = newPaths}, args {Args.ghcOptions = newGhcOptions})
+  where
+    retainPaths = \cases
+      z [] -> reverse <$> z
+      (paths, newArgs) ("-package-db" : path : rest) ->
+        let
+          pick = \case
+            Just cached -> (cached, Just cached)
+            Nothing -> (path, Just path)
+          (cachedPath, newPaths) = Map.alterF pick path paths
+        in retainPaths (newPaths, cachedPath : "-package-db" : newArgs) rest
+      (paths, newArgs) (a : rest) -> retainPaths (paths, a : newArgs) rest
