@@ -4,4 +4,4 @@ import Data.Fix
 import Data.Functor.Identity
 
 m1 :: Int
-m1 = refold runIdentity Identity 1
+m1 = const 1 (refold runIdentity Identity 1)

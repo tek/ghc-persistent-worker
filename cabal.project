@@ -8,7 +8,7 @@ packages: ./buck-proxy
           ./debug
 
 -- For MWB-customized GHC, turn this on.
--- flags: +mwb
+flags: +mwb +tek
 
 package ghc-worker
   executable-dynamic: true

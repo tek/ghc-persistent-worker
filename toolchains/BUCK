@@ -110,22 +110,24 @@ nix.rules.flake(
 persistent_worker(
     name = "persistent_worker",
     visibility = ["PUBLIC"],
-    worker = ":ghc-worker",
-    worker_proxy = ":buck-proxy",
+    # worker = ":ghc-worker",
+    # worker_proxy = ":buck-proxy",
+    worker = ":impure_ghc_worker",
+    worker_proxy = ":impure_buck_proxy",
     make = config_worker_make,
     # worker_args = ["--instrument"],
     proxy_args = [],
 )
 
-# impure_worker(
-#    name = "impure_buck_proxy",
-#    binary_path = "result-ipe-buck-proxy/bin/buck-proxy",
-# )
+impure_worker(
+   name = "impure_buck_proxy",
+   binary_path = "dist-newstyle/build/x86_64-linux/ghc-9.10.1/buck-proxy-0.1/x/buck-proxy/build/buck-proxy/buck-proxy",
+)
 
-# impure_worker(
-#    name = "impure_ghc_worker",
-#    binary_path = "result-ipe-ghc-worker/bin/ghc-worker",
-# )
+impure_worker(
+   name = "impure_ghc_worker",
+   binary_path = "dist-newstyle/build/x86_64-linux/ghc-9.10.1/ghc-worker-0.1/x/ghc-worker/build/ghc-worker/ghc-worker",
+)
 
 nix_haskell_toolchain(
     name = "haskell",

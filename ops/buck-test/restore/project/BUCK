@@ -9,6 +9,7 @@ haskell_lib(
     deps = [
         "//haskell:base",
         "//haskell:template-haskell",
+        "//haskell:dep2",
     ],
     strip_prefix = ["lib1"],
 )
@@ -47,13 +48,14 @@ haskell_lib(
     name = "restore-l3",
     srcs = [
         "L3_1.hs",
-        "L3_2.hs",
-        "L3_3.hs",
+        # "L3_2.hs",
+        # "L3_3.hs",
     ],
     deps = [
         "//haskell:base",
         "//haskell:template-haskell",
         ":restore-l2",
+        ":restore-l1",
         "//haskell:dep1",
     ],
 )

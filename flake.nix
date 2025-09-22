@@ -120,6 +120,7 @@
         ipeOverrides
         (envOverrides args.config)
       ];
+      buildInputs = pkgs: [pkgs.zlib.dev pkgs.hixPackages.proto-lens-protoc pkgs.protobuf pkgs.snappy];
     };
 
     envs.ipe = args: {
