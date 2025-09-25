@@ -29,13 +29,6 @@ import Types.Env (Env (..))
 import Types.Log (newLog)
 import Types.Target (Target (..), TargetSpec (..))
 
--- | Parse command line flags, used to create unit-specific @DynFlags@.
-unitFlags :: [String] -> HscEnv -> Ghc DynFlags
-unitFlags args HscEnv {hsc_logger, hsc_dflags = dflags0} = do
-  (dflags, _, warns) <- parseDynamicFlagsCmdLine dflags0 (map (mkGeneralLocated "no loc") args)
-  liftIO $ printOrThrowDiagnostics hsc_logger (initPrintConfig dflags) (initDiagOpts dflags) (GhcDriverMessage <$> warns)
-  pure dflags
-
 stepMetadata :: Conf -> Unit -> [Unit] -> IO ()
 stepMetadata Conf {state, tmp, args0} unit deps = do
   logVar <- newLog Nothing
