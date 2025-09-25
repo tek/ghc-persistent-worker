@@ -26,6 +26,8 @@ import Types.State (WorkerState (..))
 import Types.Target (TargetSpec (..), UnitTarget (..))
 
 -- | 'doMkDependHS' needs this to be enabled.
+--
+-- TODO remove WayDyn now that the args from buck are complete
 metadataTempSession :: HscEnv -> HscEnv
 metadataTempSession =
   hscUpdateFlags \ d -> d {ghcMode = MkDepend, targetWays_ = addWay WayDyn (targetWays_ d)}

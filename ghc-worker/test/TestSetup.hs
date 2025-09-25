@@ -138,7 +138,6 @@ baseArgs topdir tmp =
       "-fwrite-ide-info",
       "-no-link",
       "-dynamic",
-      -- "-fwrite-if-simplified-core",
       "-fbyte-code-and-object-code",
       "-fprefer-byte-code",
       -- "-shared",
