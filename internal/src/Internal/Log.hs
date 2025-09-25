@@ -3,6 +3,7 @@ module Internal.Log where
 import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_)
 import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Foldable (for_)
 import GHC (Ghc, Severity (SevIgnore), noSrcSpan)
 import GHC.Driver.Config.Diagnostic (initDiagOpts)
 import GHC.Driver.DynFlags (getDynFlags)
@@ -132,6 +133,13 @@ logFlush logger = do
     let logLines = reverse (other ++ [(msg, LogInfo) | msg <- diagnostics])
     writeLogFile traceId target logLines
     pure (Log {diagnostics = [], other = [], ..}, [msg | (msg, level) <- logLines, LogInfo == level])
+
+showLog :: Logger -> IO ()
+showLog logger =
+  withLog logger \ log@Log {..} -> do
+    for_ (reverse diagnostics) \ msg -> hPutStrLn stderr msg
+    for_ (reverse other) \ (msg, _) -> hPutStrLn stderr msg
+    pure (log, ())
 
 logToState :: Logger -> LogAction
 logToState logger logflags msg_class srcSpan msg = case msg_class of

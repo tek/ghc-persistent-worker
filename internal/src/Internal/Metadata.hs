@@ -26,6 +26,8 @@ import Types.State (WorkerState (..))
 import Types.Target (TargetSpec (..), UnitTarget (..))
 
 -- | 'doMkDependHS' needs this to be enabled.
+--
+-- TODO remove WayDyn now that the args from buck are complete
 metadataTempSession :: HscEnv -> HscEnv
 metadataTempSession =
   hscUpdateFlags \ d -> d {ghcMode = MkDepend, targetWays_ = addWay WayDyn (targetWays_ d)}
@@ -88,6 +90,7 @@ computeMetadata env = do
       for_ env.args.cachedBuildPlans \ bp ->
         withSession (liftIO . loadCachedUnits env.log env.state dflags bp)
       pure (Just ())
+    liftIO $ print env.args.ghcOptions
     MaybeT $ runSession True env $ withDynFlags env \ dflags srcs -> do
       unit <- prepareMetadataSession env dflags
       let target = TargetUnit (UnitTarget unit)
