@@ -4,6 +4,7 @@
 
 [
   "base"
+  "data-fix"
   "dep1"
   "dep10"
   "dep100"
