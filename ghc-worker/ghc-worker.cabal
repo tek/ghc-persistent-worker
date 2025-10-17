@@ -30,6 +30,7 @@ library
   ghc-options: -O2
   hs-source-dirs: lib
   exposed-modules:
+    GhcWorker.Batch
     GhcWorker.CompileResult
     GhcWorker.GhcHandler
     GhcWorker.Grpc

@@ -280,6 +280,20 @@
           source-dirs = "test";
           dependOnLibrary = false;
         };
+
+        executables.batch-worker = {};
+
+        executables.ghc-bin = {
+          dependencies = [
+            "containers"
+            "filepath"
+            "ghc"
+            "ghc-boot"
+            "transformers"
+          ];
+          dependOnLibrary = false;
+        };
+
       };
 
       debug = {
