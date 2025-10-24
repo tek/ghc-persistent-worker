@@ -1,12 +1,12 @@
 {-# LANGUAGE CPP #-}
+#define RECENT (MIN_VERSION_GLASGOW_HASKELL(9,13,0,0) || defined(MWB_2025_10))
 
 module Internal.State.Make where
 
 import GHC.Driver.Env (HscEnv (..))
-import GHC.Types.Unique.DFM (plusUDFM)
-import GHC.Unit.Env (HomeUnitEnv (..), UnitEnv (..), unitEnv_insert, unitEnv_lookup, unitEnv_union)
-import GHC.Unit.Module.Graph (ModuleGraph)
+import GHC.Unit.Env (UnitEnv (..))
 import Internal.State.Stats (logMemStats)
+import Internal.UnitEnv (mergeUnitEnvs)
 import Types.Log (Logger)
 import Types.State.Make (MakeState (..))
 
@@ -14,10 +14,21 @@ import Types.State.Make (MakeState (..))
 
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import GHC.Unit.Module.Graph (ModuleGraphNode (..), mgModSummaries', mkModuleGraph, mkNodeKey)
+import GHC.Unit.Module.Graph (ModuleGraph, ModuleGraphNode (..), mgModSummaries', mkModuleGraph, mkNodeKey)
+
+#if RECENT
+
+import GHC.Unit.Home.Graph (unitEnv_insert, unitEnv_lookup)
 
 #else
 
+import GHC.Unit.Env (unitEnv_insert, unitEnv_lookup)
+
+#endif
+
+#else
+
+import GHC.Unit.Env (unitEnv_insert, unitEnv_lookup)
 import GHC.Unit.Module.Graph (unionMG)
 
 #endif
@@ -100,13 +111,6 @@ insertUnitEnv hsc_env state =
     current = hsc_env.hsc_unit_env.ue_current_unit
     update = unitEnv_insert current ue
 
-mergeHugs ::
-  HomeUnitEnv ->
-  HomeUnitEnv ->
-  HomeUnitEnv
-mergeHugs old new =
-  new {homeUnitEnv_hpt = plusUDFM old.homeUnitEnv_hpt new.homeUnitEnv_hpt}
-
 -- | Store the changes made to the HUG by @compileHpt@ in the state, which usually consists of adding a single
 -- 'HomeModInfo'.
 storeState ::
@@ -117,5 +121,5 @@ storeState ::
 storeState logger hsc_env state = do
   logMemStats "store make state" logger
   let !new = hsc_env.hsc_unit_env.ue_home_unit_graph
-      !hug = unitEnv_union mergeHugs state.hug new
+  !hug <- mergeUnitEnvs state.hug new
   pure state {hug}
