@@ -49,6 +49,17 @@ loadState logger hsc_env state = do
 
     restoreHug e = e {hsc_unit_env = e.hsc_unit_env {ue_home_unit_graph = state.hug}}
 
+loadUnitState ::
+  Logger ->
+  HscEnv ->
+  MakeState ->
+  IO HscEnv
+loadUnitState logger hsc_env state = do
+  logMemStats "load state" logger
+  pure (restoreHug hsc_env)
+  where
+    restoreHug e = e {hsc_unit_env = e.hsc_unit_env {ue_home_unit_graph = state.hug}}
+
 -- | Restore the shared state used by @compileHpt@ from the state, consisting of the module graph, the HPT, and the
 -- loader state and symbol cache that's contained in 'Interp'.
 -- The module graph is only modified by @computeMetadata@, so it will not be written back to the state after
