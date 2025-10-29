@@ -12,11 +12,12 @@ import GHC.Platform.Ways (Way (WayDyn), addWay)
 import GHC.Runtime.Loader (initializeSessionPlugins)
 import GHC.Unit (UnitId)
 import Internal.Cache.Metadata (addHomeUnitTo, loadCachedUnits)
+import Internal.Debug (showModGraph)
 import Internal.Log (logDebug, logTimed)
 import Internal.MakeFile (doMkDependHS)
 import Internal.Session (runSession, withDynFlags)
 import Internal.State (updateMakeStateVar)
-import Internal.State.Make (insertUnitEnv, loadState, storeModuleGraph)
+import Internal.State.Make (insertUnitEnv, loadState, loadUnitState, storeModuleGraph)
 import Internal.State.Stats (logMemStats)
 import System.Directory (createDirectoryIfMissing)
 import Types.Args (Args (..))
@@ -24,6 +25,7 @@ import Types.Env (Env (..))
 import Types.Log (Logger (..))
 import Types.State (WorkerState (..))
 import Types.Target (TargetSpec (..), UnitTarget (..))
+import GHC.Utils.Outputable (text, (<+>))
 
 -- | 'doMkDependHS' needs this to be enabled.
 --
@@ -53,7 +55,10 @@ addHomeUnit dflags = do
 prepareMetadataSession :: Env -> DynFlags -> Ghc UnitId
 prepareMetadataSession env dflags = do
   state <- liftIO $ readMVar env.state
-  modifySessionM \ hsc_env -> liftIO (loadState env.log hsc_env state.make)
+  modifySessionM \ hsc_env ->
+    if False
+    then liftIO (loadState env.log hsc_env state.make)
+    else liftIO (loadUnitState env.log hsc_env state.make)
   unit <- addHomeUnit dflags
   setActiveUnit unit
   storeNewUnit
@@ -66,11 +71,11 @@ prepareMetadataSession env dflags = do
 -- | Run 'doMkDependHS' to write the metadata JSON file and exfiltrate the module graph.
 -- We need to use a temporary session because 'doMkDependHS' uses some custom settings that we don't want to leak,
 -- though it's not been thoroughly tested what precisely the impact is.
-writeMetadata :: [String] -> Ghc ModuleGraph
-writeMetadata srcs = do
+writeMetadata :: Logger -> [String] -> Ghc ModuleGraph
+writeMetadata logger srcs = do
   initializeSessionPlugins
   withTempSession metadataTempSession do
-    doMkDependHS srcs
+    doMkDependHS logger srcs
 
 -- | Run downsweep and merge the resulting module graph into the cached graph.
 -- This is executed for the metadata step, which natively only calls 'doMkDependHS'.
@@ -95,7 +100,9 @@ computeMetadata env = do
         unit <- prepareMetadataSession env dflags
         let target = TargetUnit (UnitTarget unit)
         liftIO $ env.log.setTarget target
-        module_graph <- writeMetadata (fst <$> srcs)
+        mg <- withSession \ h -> pure h.hsc_mod_graph
+        liftIO $ env.log.debugD (text "module graph before MkDepend:" <+> showModGraph mg)
+        module_graph <- writeMetadata env.log (fst <$> srcs)
         liftIO $ updateMakeStateVar env.state (storeModuleGraph module_graph)
         for_ dflags.stubDir \ stubdir -> do
           logDebug env.log ("Creating stubdir: " ++ stubdir)
