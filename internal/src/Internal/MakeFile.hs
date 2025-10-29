@@ -68,6 +68,8 @@ import System.Directory
 import System.FilePath
 import System.IO
 import System.IO.Error (isEOFError)
+import qualified Types.Log as Worker
+import Internal.Log (logTimed)
 
 #if !MIN_VERSION_GLASGOW_HASKELL(9,10,0,0)
 import GHC.Utils.Panic.Plain
@@ -82,8 +84,8 @@ ms_opts _ = []
 
 #endif
 
-doMkDependHS :: GhcMonad m => [FilePath] -> m ModuleGraph
-doMkDependHS srcs = do
+doMkDependHS :: GhcMonad m => Worker.Logger -> [FilePath] -> m ModuleGraph
+doMkDependHS log srcs = do
     -- Initialisation
     dflags0 <- GHC.getSessionDynFlags
 
@@ -96,10 +98,12 @@ doMkDependHS srcs = do
     targets <- mapM (\s -> GHC.guessTarget s Nothing Nothing) srcs
     GHC.setTargets targets
     let excl_mods = depExcludeMods dflags
-    (errs, module_graph) <- withSession \ hsc_env -> liftIO $ downsweepCompat hsc_env [] excl_mods True
+    (errs, module_graph) <- logTimed log "downsweep" do
+      withSession \ hsc_env -> liftIO $ downsweepCompat hsc_env [] excl_mods True
     let msgs = unionManyMessages errs
     unless (isEmptyMessages msgs) $ throwErrors (fmap GhcDriverMessage msgs)
-    doMkDependModuleGraph dflags module_graph
+    logTimed log "MkDepend" do
+      doMkDependModuleGraph dflags module_graph
     pure module_graph
     where
 #if FIXED_NODES
@@ -281,7 +285,8 @@ processDeps dflags hsc_env excl_mods root hdl m_dep_json (AcyclicSCC (ModuleNode
       import_deps NotBoot (ms_imps node)
     ]
   updateJson m_dep_json (updateDepJSON include_pkg_deps pp dep_node deps)
-  writeDependencies include_pkg_deps root hdl extra_suffixes dep_node deps
+  when False do
+    writeDependencies include_pkg_deps root hdl extra_suffixes dep_node deps
   where
     extra_suffixes = depSuffixes dflags
     include_pkg_deps = depIncludePkgDeps dflags

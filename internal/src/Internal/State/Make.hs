@@ -5,6 +5,7 @@ module Internal.State.Make where
 
 import GHC.Driver.Env (HscEnv (..))
 import GHC.Unit.Env (UnitEnv (..))
+import GHC.Unit.Module.Graph (ModuleGraph)
 import Internal.State.Stats (logMemStats)
 import Internal.UnitEnv (mergeUnitEnvs)
 import Types.Log (Logger)
@@ -14,7 +15,7 @@ import Types.State.Make (MakeState (..))
 
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import GHC.Unit.Module.Graph (ModuleGraph, ModuleGraphNode (..), mgModSummaries', mkModuleGraph, mkNodeKey)
+import GHC.Unit.Module.Graph (ModuleGraphNode (..), mgModSummaries', mkModuleGraph, mkNodeKey)
 
 #if RECENT
 
@@ -46,6 +47,17 @@ loadState logger hsc_env state = do
   where
     restoreModuleGraph e = e {hsc_mod_graph = state.moduleGraph}
 
+    restoreHug e = e {hsc_unit_env = e.hsc_unit_env {ue_home_unit_graph = state.hug}}
+
+loadUnitState ::
+  Logger ->
+  HscEnv ->
+  MakeState ->
+  IO HscEnv
+loadUnitState logger hsc_env state = do
+  logMemStats "load state" logger
+  pure (restoreHug hsc_env)
+  where
     restoreHug e = e {hsc_unit_env = e.hsc_unit_env {ue_home_unit_graph = state.hug}}
 
 -- | Restore the shared state used by @compileHpt@ from the state, consisting of the module graph, the HPT, and the
