@@ -373,6 +373,7 @@
             "aeson"
             "buck-worker-types"
             "containers"
+            "deepseq"
             "directory"
             "exceptions"
             "filepath"
