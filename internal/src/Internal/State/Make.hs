@@ -101,14 +101,16 @@ storeModuleGraph new state =
       mkModuleGraph (Map.elems (Map.unionWith mergeNodes oldMap newMap))
       where
         mergeNodes = \cases
-          (ModuleNode oldDeps _) (ModuleNode newDeps summ) -> ModuleNode (mergeDeps oldDeps newDeps) summ
+          (ModuleNode oldDeps _) (ModuleNode newDeps summ) ->
+            let !d = mergeDeps oldDeps newDeps
+            in ModuleNode d summ
           _ newNode -> newNode
 
         mergeDeps oldDeps newDeps = Set.toList (Set.fromList oldDeps <> Set.fromList newDeps)
 
-        oldMap = Map.fromList $ [(mkNodeKey n, n) | n <- mgModSummaries' old]
+        !oldMap = Map.fromList $ [(mkNodeKey n, n) | n <- mgModSummaries' old]
 
-        newMap = Map.fromList $ [(mkNodeKey n, n) | n <- mgModSummaries' new]
+        !newMap = Map.fromList $ [(mkNodeKey n, n) | n <- mgModSummaries' new]
 #else
     state {moduleGraph = unionMG state.moduleGraph new}
 #endif

@@ -1,9 +1,13 @@
 {-# LANGUAGE CPP #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE DeriveAnyClass #-}
 #define RECENT (MIN_VERSION_GLASGOW_HASKELL(9,13,0,0) || defined(MWB_2025_10))
 
 module Internal.Cache.Metadata where
 
+import GHC.Unit (GenericUnitInfo (..), PackageId (..), PackageName (..))
 import Control.Concurrent (MVar, modifyMVar)
+import Control.DeepSeq (rnf, NFData)
 import Control.Exception (throwIO)
 import Control.Monad (foldM, (>=>))
 import Control.Monad.IO.Class (liftIO)
@@ -17,11 +21,12 @@ import qualified GHC
 import GHC (DynFlags (..), IsBootInterface (..), ModuleName (..), mkModuleGraph)
 import GHC.Driver.Env (HscEnv (..), hscSetActiveUnitId)
 import GHC.Driver.Make (ModNodeKeyWithUid (..))
-import GHC.Driver.Session (updatePlatformConstants)
-import GHC.Unit (GenWithIsBoot (..), HomeUnit, UnitDatabase, UnitId, UnitState, initUnits)
+import GHC.Driver.Session (updatePlatformConstants, PackageArg (..))
+import GHC.Unit (GenWithIsBoot (..), HomeUnit, UnitDatabase, UnitId (..), UnitState, initUnits)
 import GHC.Unit.Env (HomeUnitEnv (..), UnitEnv (..), updateHug)
 import GHC.Unit.Home (GenHomeUnit (DefiniteHomeUnit))
 import GHC.Unit.Module.Graph (ModuleGraphNode (..), NodeKey (..))
+import GHC.Unit.State (ModuleOrigin (..), UnitState (..))
 import GHC.Utils.Outputable (ppr, quotes, text, (<+>))
 import Internal.DynFlags (buckLocation, parseFlags, setupPath)
 import Internal.Error (notePpr)
@@ -51,6 +56,14 @@ import GHC.Driver.Errors.Types (GhcMessage (..))
 import GHC.Driver.Make (summariseFile)
 import GHC.Unit.Env (unitEnv_insert, unitEnv_keys, unitEnv_lookup_maybe)
 import Internal.Error (eitherMessages)
+import GHC.Generics (Generic)
+import GHC.Types.Unique.FM (UniqFM, seqEltsUFM)
+
+#endif
+
+#if !defined(MWB)
+
+import GHC.Types.Unique.Set (UniqSet, getUniqSet)
 
 #endif
 
@@ -78,11 +91,80 @@ insertHomeUnit unit dflags dbs unit_state home_unit unit_env = do
       homeUnitEnv_home_unit = Just home_unit
     }
 
+deriving stock instance Generic (GenericUnitInfo srcpkgid srcpkgname uid modulename mod)
+
+instance (
+  NFData srcpkgid,
+  NFData srcpkgname,
+  NFData uid,
+  NFData modulename,
+  NFData mod
+  ) => NFData (GenericUnitInfo srcpkgid srcpkgname uid modulename mod) where
+
+deriving newtype instance NFData PackageId
+deriving newtype instance NFData PackageName
+deriving newtype instance NFData UnitId
+
+instance NFData ModuleOrigin where
+  rnf = \case
+    ModHidden -> ()
+    ModUnusable _ -> ()
+    ModOrigin {..} ->
+      rnf fromOrigUnit
+      `seq`
+      rnf fromExposedReexport
+      `seq`
+      rnf fromHiddenReexport
+      `seq`
+      rnf fromPackageFlag
+      `seq`
+      ()
+
+deriving stock instance Generic UnitState
+--
+-- deriving anyclass instance NFData UnitState
+
+instance NFData a => NFData (UniqFM k a) where
+  rnf fm = seqEltsUFM rnf fm
+
+#if !defined(MWB)
+instance NFData a => NFData (UniqSet a) where
+  rnf fm = seqEltsUFM rnf (getUniqSet fm)
+#endif
+
+deriving stock instance Generic PackageArg
+deriving anyclass instance NFData PackageArg
+
 -- | Create a new home unit using the supplied 'DynFlags'.
 initHomeUnit :: DynFlags -> GHC.Logger -> UnitId -> UnitEnv -> IO UnitEnv
 initHomeUnit dflags0 logger unit unit_env = do
   (dbs, unit_state, home_unit, mconstants) <- initUnits logger dflags0 Nothing allUnitIds
   dflags1 <- updatePlatformConstants dflags0 mconstants
+  let
+    !() =
+      rnf unit_state.unitInfoMap
+      `seq`
+      rnf unit_state.preloadClosure
+      `seq`
+      rnf unit_state.packageNameMap
+      `seq`
+      rnf unit_state.wireMap
+      `seq`
+      rnf unit_state.unwireMap
+      `seq`
+      rnf unit_state.preloadUnits
+      `seq`
+      rnf unit_state.explicitUnits
+      `seq`
+      rnf unit_state.homeUnitDepends
+      `seq`
+      rnf unit_state.moduleNameProvidersMap
+      `seq`
+      rnf unit_state.pluginModuleNameProvidersMap
+      `seq`
+      rnf unit_state.requirementContext
+      `seq`
+      rnf unit_state.allowVirtualUnits
   insertHomeUnit unit dflags1 dbs unit_state home_unit unit_env
   where
     allUnitIds = unitEnv_keys (ue_home_unit_graph unit_env)
