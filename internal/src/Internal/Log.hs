@@ -65,21 +65,18 @@ newLogger state =
         debugD = debug . showPprUnsafe
       }
 
-modifyLog :: Logger -> (Log -> IO Log) -> IO ()
-modifyLog Logger {withLog} f =
-  withLog \ l -> do
-    new <- f l
-    pure (new, ())
+newNoopLogger :: MVar Log -> Logger
+newNoopLogger state =
+  Logger {
+    withLog = modifyMVar state,
+    setTarget = setLogTarget state,
+    debug = const (pure ()),
+    debugD = const (pure ())
+  }
 
 mapLog :: Logger -> (Log -> Log) -> IO ()
 mapLog Logger {withLog} f =
   withLog \ l -> pure (f l, ())
-
-withLog_ :: Logger -> (Log -> IO a) -> IO a
-withLog_ Logger {withLog} f =
-  withLog \ l -> do
-    res <- f l
-    pure (l, res)
 
 logDiagnostics ::
   MonadIO m =>
