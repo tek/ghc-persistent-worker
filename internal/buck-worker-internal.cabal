@@ -74,6 +74,7 @@ library
                       buck-worker-types,
                       bytestring,
                       containers,
+                      deepseq,
                       directory,
                       exceptions,
                       filepath,
