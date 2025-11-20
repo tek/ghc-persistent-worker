@@ -209,7 +209,7 @@
 
     envs.hls.compiler = "ghc910";
 
-    envs.hix-build-tools.package-set.compiler.source = "ghc910";
+    envs.hix-build-tools.package-set.extends = "mwb-25-07";
 
     output.extraPackages = ["ghc-debug-brick" "eventlog2html" "hp2pretty" "ghc-events"];
 
