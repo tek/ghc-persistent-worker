@@ -13,8 +13,21 @@
 
   outputs = {hix, ghc-debug, fenix, ...}: let
 
-    testEnv = config: {
+    testEnv = config: let
+
+      recache = drv: drv.overrideAttrs (old: {
+        postInstall = (old.postInstall or "") + ''
+        ghc-pkg recache --package-db $packageConfDir
+        '';
+      });
+
+      recacheName = name: "${recache config.toolchain.packages.${name}}";
+
+    in {
       ghc_dir = "${config.toolchain.vanilla.ghc}";
+      pkg_hashable = recacheName "hashable";
+      pkg_data_fix = recacheName "data-fix";
+      pkg_semigroups = recacheName "semigroups";
     };
 
     sharedExeOverrides = {modify, hsLibC, ...}: {
@@ -42,15 +55,23 @@
       ghc-worker = notest;
     };
 
-    overrides_mwb_flag = extra: {enable, ...}: {
-      buck-worker-internal = enable extra (enable "mwb");
+    overrides_mwb_flag = extra: {enable, ...}: let
+
+      flags = builtins.foldl' (z: flag: enable flag z) (enable "mwb") extra;
+
+    in {
+      buck-worker-types = flags;
+      buck-worker-internal = flags;
+      ghc-worker = flags;
     };
 
-    commonOverrides = branch: args: [
+    commonOverrides = flags: args: [
       sharedExeOverrides
       (envOverrides args.config)
-      (overrides_mwb_flag branch)
+      (overrides_mwb_flag flags)
     ];
+
+    localGhc = true;
 
   in hix ({config, build, lib, util, ...}: let
 
@@ -72,7 +93,7 @@
     compiler = "ghc910";
     ghcVersions = [];
     main = "ghc-worker";
-    ghci.args = ["-package ghc"];
+    ghci.args = ["-package ghc" "-DMWB" "-DMWB_2025_07" "-DGHC_UNIT_INDEX"];
     hls.genCabal = false;
 
     compilers = {
@@ -81,16 +102,16 @@
         url = "https://gitlab.haskell.org/ghc/ghc";
         version = "9.10.1";
         flavour = "release+split_sections+ipe";
-        rev = "75206a243dc7ad43867582c6bb8ffd51878f8a7e";
-        hash = "sha256-OHd9kmG2ReOd/FerRXAEHmKuiHu/Se/Uv7OfgvJzBoI=";
+        rev = "87ff8f54ef81c44f1c2127a5c85c58a8611ab173";
+        hash = "sha256-rB/IKgLMtJgcHrhtPh5OzjL8lcWhjNqQnMTGMEFRTNs=";
       };
 
       mwb-25-07-ipe.source.build = {
         url = "https://gitlab.haskell.org/ghc/ghc";
         version = "9.10.1";
         flavour = "release+split_sections+ipe";
-        rev = "e5fb170e47efa851ad43659899feb1f53017d127";
-        hash = "sha256-1ekDaHeoUmYQlNAyDak3YOdXAyN18q50Yc+poGD6LWY=";
+        rev = "f2b850320231ccb5fc56deb56579f999ab14567e";
+        hash = "sha256-NICNP0hUZe+EhEVfcbsA0f4Ph9aSFzDGj2QaYA56nSM=";
       };
 
       mwb-25-07-no-ipe = {
@@ -120,7 +141,7 @@
       env = testEnv args.config;
       hls.enable = lib.mkForce false;
       package-set.extends = "mwb-25-07";
-      overrides = commonOverrides "mwb-25-07" args ++ [ipeOverrides];
+      overrides = commonOverrides ["ghc-unit-index" "mwb-25-07"] args ++ [ipeOverrides];
       buildInputs = pkgs: [pkgs.zlib pkgs.snappy pkgs.protobuf pkgs.hixPackages.proto-lens-protoc];
     };
 
@@ -128,14 +149,14 @@
       expose.scoped = true;
       env = testEnv args.config;
       package-set.extends = "mwb-25-07";
-      overrides = commonOverrides "mwb-25-07" args ++ [buckBinOverrides ipeOverrides];
+      overrides = commonOverrides ["ghc-unit-index" "mwb-25-07"] args ++ [buckBinOverrides ipeOverrides];
     };
 
     envs.mwb-25-10 = args: {
       expose.scoped = true;
       env = testEnv args.config;
       package-set.extends = "mwb-25-10";
-      overrides = commonOverrides "mwb-25-10" args ++ [buckBinOverrides ipeOverrides];
+      overrides = commonOverrides ["ghc-unit-index" "mwb-25-10"] args ++ [buckBinOverrides ipeOverrides];
       packages = [
         "ghc-worker"
         "buck-proxy"
@@ -150,13 +171,13 @@
       expose.scoped = true;
       env = testEnv args.config;
       package-set.extends = "mwb";
-      overrides = commonOverrides "mwb" args ++ [buckBinOverrides];
+      overrides = commonOverrides ["ghc-unit-index" "mwb"] args ++ [buckBinOverrides];
     };
 
     envs.profiled = args: {
       env = testEnv args.config;
       package-set.extends = "mwb-25-07";
-      overrides = commonOverrides "mwb-25-07" args ++ [ipeOverrides];
+      overrides = commonOverrides ["ghc-unit-index" "mwb-25-07"] args ++ [ipeOverrides];
     };
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -206,9 +227,61 @@
 
     # ------------------------------------------------------------------------------------------------------------------
 
-    envs.hls-db = {};
+    envs.hls-db = {
+      package-set.extends = "mwb-25-07";
+    };
 
-    envs.hls.compiler = "ghc910";
+    envs.hls = {
+      package-set.extends = "mwb-25-07";
+
+      overrides = {hackage, fast, force, unbreak, nobench, notest, source, modify, hsLibC, disable, drv, ...}: let
+
+        github = {owner ? "tek", repo, rev, hash, path ? ""}:
+          fast (unbreak (nobench (notest (source.sub (config.pkgs.fetchFromGitHub { inherit owner repo rev hash; }) path))));
+
+        rev = "62f20e9cb638908c6396b7866b5f32372a722fb7";
+        hash = "sha256-zqSN0gxMJVSlskPTQhzp8Lln4fOlmrbby4NMKG+Z3sg=";
+
+        hlsPackage = path: github {
+          repo = "haskell-language-server";
+          inherit rev hash;
+          inherit path;
+        };
+
+      in {
+
+        binary-instances = force;
+
+        cabal-add = fast (force (hackage "0.2" "0yxh19iqspai0003p83rsnqkhq2dxa3a2vz3qfzg3k4392z1zbvi"));
+
+        haskell-language-server =
+          lib.foldl (lib.flip disable) (modify hsLibC.enableSharedExecutables (hlsPackage "")) [
+            "stan" "stylishHaskell" "ormolu" "fourmolu" "hlint"
+          ];
+        ghcide = hlsPackage "ghcide";
+        hls-graph = hlsPackage "hls-graph";
+        hls-plugin-api = hlsPackage "hls-plugin-api";
+        hls-test-utils = hlsPackage "hls-test-utils";
+
+        hie-bios = github {
+          repo = "hie-bios";
+          rev = "6847c318cb8524f1d46d2bf02b991318253cef9b";
+          hash = "sha256-rR8b2g6Req5Ssr4TtfMCNQZFqRrgG0S+pMj06KkE+q4=";
+        };
+
+        Diff = hackage "0.5" "13n231179wa9xm2933f328v00jb486w740yahz4qcbza4yv39w1i";
+        directory-ospath-streaming = hackage "0.3" "0m0v200mgmkizm3l6pw9x9gvqx9xancgsal4z1pb7hi2pgrj0w0d";
+        fourmolu = drv null;
+        ghc-lib-parser = hackage "9.12.2.20250421" "0qxi41zr50chrr6isyfpff5kq6kqxhc5iri6a8ixvz27042a0hsq";
+        ghc-lib-parser-ex = hackage "9.12.0.0" "1kxdwr1vpjn4rlhbvajdh25zjl3wyl8lli0krmdxlp03jg4p2vlx";
+        hiedb = notest (hackage "0.7.0.0" "0i6szmajpg1w2mi29vs2z3brjhznivaq2his6zcz38gpyfr2dlwi");
+        hlint = drv null;
+        ormolu = drv null;
+        stan = drv null;
+        stylish-haskell = drv null;
+
+      };
+    };
 
     # Use GHC 9.8 for `cabal-install` and other build tools because:
     # - If we used the same GHC as the build (i.e. MWB branch), any time the GHC changes, Cabal would be rebuilt, which
@@ -286,6 +359,7 @@
             "filepath"
             "ghc"
             "temporary"
+            "text"
             "typed-process"
           ];
           source-dirs = "test";
@@ -375,55 +449,17 @@
             "buck-worker-types"
             "containers"
             "directory"
+            "deepseq"
             "exceptions"
             "filepath"
             "ghc"
+            "ghc-boot"
+            "ghc-internal"
             "time"
             "transformers"
           ];
           source-dirs = "src";
           ghc-options = ["-O2"];
-        };
-
-        cabal = {
-
-          meta.flags = {
-
-            mwb = {
-              description = "use mwb-customized GHC";
-              manual = true;
-              default = false;
-            };
-
-            mwb-25-07 = {
-              description = "use mwb-customized GHC from July 2025";
-              manual = true;
-              default = false;
-            };
-
-            mwb-25-10 = {
-              description = "use mwb-customized GHC from October 2025";
-              manual = true;
-              default = false;
-            };
-
-          };
-
-          component.when = [
-            {
-              condition = "flag(mwb)";
-              cpp-options = ["-DMWB"];
-            }
-            {
-              condition = "flag(mwb-25-07)";
-              cpp-options = ["-DMWB_2025_07"];
-            }
-            {
-              condition = "flag(mwb-25-10)";
-              cpp-options = ["-DMWB_2025_10"];
-            }
-          ];
-
         };
       };
 
@@ -546,6 +582,11 @@
       };
     };
 
+    package-sets.hls = {
+      extends = "mwb-25-07";
+
+    };
+
 
     overrides = {hackage, force, source, notest, ...}: {
       auto-update = hackage "0.2.6" "0sp25j3fcgmfr2zv1ccg1id1iynj3azinjg23g0vy1m1m7gnmkzi";
@@ -635,6 +676,58 @@
         "-Wunused-type-patterns"
         "-Wunused-packages"
       ];
+
+      meta = {
+
+        flags = {
+
+          mwb = {
+            description = "Use mwb-customized GHC";
+            manual = true;
+            default = false;
+          };
+
+          mwb-25-07 = {
+            description = "Use mwb-customized GHC from July 2025";
+            manual = true;
+            default = false;
+          };
+
+          mwb-25-10 = {
+            description = "Use mwb-customized GHC from October 2025";
+            manual = true;
+            default = false;
+          };
+
+          ghc-unit-index = {
+            description = "Convenience flag for temporary changes made in an environment-injected local GHC";
+            manual = true;
+            default = false;
+          };
+
+        };
+
+        when = [
+          {
+            condition = "flag(mwb)";
+            cpp-options = ["-DMWB"];
+          }
+          {
+            condition = "flag(mwb-25-07)";
+            cpp-options = ["-DMWB_2025_07"];
+          }
+          {
+            condition = "flag(mwb-25-10)";
+            cpp-options = ["-DMWB_2025_10"];
+          }
+          {
+            condition = "flag(ghc-unit-index)";
+            cpp-options = ["-DGHC_UNIT_INDEX"];
+          }
+        ];
+
+      };
+
     };
 
   });

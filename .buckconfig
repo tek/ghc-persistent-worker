@@ -18,7 +18,7 @@ prelude = git
 
 [external_cell_prelude]
 git_origin = https://github.com/MercuryTechnologies/buck2-prelude.git
-commit_hash = fb5539861f92336a60ea6c82a02a8ba92ee060a2
+commit_hash = 62b8c494f2df8157a0cbb32052f2c54ef2add35c
 
 [parser]
 target_platform_detector_spec = target:root//...->prelude//platforms:default
