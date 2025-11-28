@@ -6,6 +6,11 @@ license: MIT
 license-file: LICENSE
 build-type: Simple
 
+flag ghc-unit-index
+    description: Convenience flag for temporary changes made in an environment-injected local GHC
+    manual: True
+    default: False
+
 library
   ghc-options: -Wall -Widentities -Wincomplete-uni-patterns -Wmissing-deriving-strategies -Wredundant-constraints -Wunused-type-patterns -Wunused-packages -O2
   default-language: GHC2021
@@ -48,3 +53,6 @@ library
     ghc,
     split,
     text
+
+  if (flag(ghc-unit-index))
+      cpp-options: -DGHC_UNIT_INDEX

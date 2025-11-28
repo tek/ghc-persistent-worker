@@ -5,6 +5,7 @@ import Control.Monad (unless)
 import Control.Monad.Catch (MonadCatch, onException)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Fixed (Milli, Pico)
+import Data.Foldable (for_)
 import Data.Time (diffUTCTime, getCurrentTime, nominalDiffTimeToSeconds)
 import GHC (Ghc, Severity (SevIgnore), noSrcSpan)
 import GHC.Driver.Config.Diagnostic (initDiagOpts)
@@ -134,6 +135,13 @@ logFlush logger = do
     let logLines = reverse (other ++ [(msg, LogInfo) | msg <- diagnostics])
     writeLogFile traceId target logLines
     pure (Log {diagnostics = [], other = [], ..}, [msg | (msg, level) <- logLines, LogInfo == level])
+
+logFlushDebug :: Logger -> IO ()
+logFlushDebug logger = do
+  modifyLog logger \ Log {..} -> do
+    let logLines = reverse (other ++ [(msg, LogInfo) | msg <- diagnostics])
+    for_ logLines \ (l, _) -> dbg l
+    pure (Log {diagnostics = [], other = [], ..})
 
 logToState :: Logger -> LogAction
 logToState logger logflags msg_class srcSpan msg = case msg_class of

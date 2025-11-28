@@ -28,6 +28,11 @@ flag mwb-25-10
     manual: True
     default: False
 
+flag ghc-unit-index
+    description: Convenience flag for temporary changes made in an environment-injected local GHC
+    manual: True
+    default: False
+
 library
     ghc-options:      -Wall
     hs-source-dirs:   src
@@ -49,6 +54,8 @@ library
                       Internal.State.Make
                       Internal.State.Oneshot
                       Internal.State.Stats
+                      Internal.State.UnitIndex
+                      Internal.State.UnitStateLegacy
                       Internal.UnitEnv
 
     if (impl(ghc >= 9.11))
@@ -69,16 +76,21 @@ library
     if (flag(mwb-25-10))
         cpp-options: -DMWB -DMWB_2025_10
 
+    if (flag(ghc-unit-index))
+        cpp-options: -DGHC_UNIT_INDEX
+
     build-depends:    aeson,
                       binary,
                       buck-worker-types,
                       bytestring,
                       containers,
                       directory,
+                      deepseq,
                       exceptions,
                       filepath,
                       ghc,
                       ghc-boot,
+                      ghc-internal,
                       text,
                       time,
                       transformers,

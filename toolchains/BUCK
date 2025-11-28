@@ -111,10 +111,12 @@ persistent_worker(
     name = "persistent_worker",
     visibility = ["PUBLIC"],
     worker = ":ghc-worker",
+    # worker = ":impure_ghc_worker",
     worker_proxy = ":buck-proxy",
     make = config_worker_make,
     # worker_args = ["--instrument"],
-    proxy_args = [],
+    proxy_args = ["--remain"],
+    # proxy_args = [],
 )
 
 # impure_worker(
@@ -122,10 +124,10 @@ persistent_worker(
 #    binary_path = "result-ipe-buck-proxy/bin/buck-proxy",
 # )
 
-# impure_worker(
-#    name = "impure_ghc_worker",
-#    binary_path = "result-ipe-ghc-worker/bin/ghc-worker",
-# )
+impure_worker(
+   name = "impure_ghc_worker",
+   binary_path = "/data/mercury/code/haskell/persistent-worker/dist-newstyle/build/x86_64-linux/ghc-9.10.1/ghc-worker-0.1/x/ghc-worker/build/ghc-worker/ghc-worker",
+)
 
 nix_haskell_toolchain(
     name = "haskell",
