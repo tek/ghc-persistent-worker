@@ -20,21 +20,8 @@ import qualified GHC
 import GHC (DynFlags (..), IsBootInterface (..), ModuleName (..), mkModuleGraph)
 import GHC.Driver.Env (HscEnv (..), hscSetActiveUnitId)
 import GHC.Driver.Make (ModNodeKeyWithUid (..))
-import GHC.Driver.Session (PackageArg (..), updatePlatformConstants)
-import GHC.Unit (
-  GenWithIsBoot (..),
-  GenericUnitInfo (..),
-  HomeUnit,
-  ModuleOrigin (..),
-  PackageId (..),
-  PackageName (..),
-  UnitDatabase,
-  UnitId (..),
-  UnitState,
-  UnusableUnit (..),
-  UnusableUnitReason (..),
-  initUnits,
-  )
+import GHC.Driver.Session (updatePlatformConstants)
+import GHC.Unit (GenWithIsBoot (..), HomeUnit, UnitDatabase, UnitId (..), UnitState, initUnits)
 import GHC.Unit.Env (HomeUnitEnv (..), UnitEnv (..), updateHug)
 import GHC.Unit.Home (GenHomeUnit (DefiniteHomeUnit))
 import GHC.Unit.Module.Graph (ModuleGraphNode (..), NodeKey (..))

@@ -102,16 +102,16 @@
         url = "https://gitlab.haskell.org/ghc/ghc";
         version = "9.10.1";
         flavour = "release+split_sections+ipe";
-        rev = "87ff8f54ef81c44f1c2127a5c85c58a8611ab173";
-        hash = "sha256-rB/IKgLMtJgcHrhtPh5OzjL8lcWhjNqQnMTGMEFRTNs=";
+        rev = "afa9ff5f3bb30119e68b8e96fecd025b5aae6a38";
+        hash = "sha256-xXsxQX7JrZJowo9d4bn5cJCebTgwPTzlNs/0SKKzw+E=";
       };
 
       mwb-25-07-ipe.source.build = {
         url = "https://gitlab.haskell.org/ghc/ghc";
         version = "9.10.1";
         flavour = "release+split_sections+ipe";
-        rev = "f2b850320231ccb5fc56deb56579f999ab14567e";
-        hash = "sha256-NICNP0hUZe+EhEVfcbsA0f4Ph9aSFzDGj2QaYA56nSM=";
+        rev = "b31c9d529d0588f2cf149d8ba5338b7ff749cad4";
+        hash = "sha256-itnkQTXcUF+Nj/Ff2i0WKAd89RtDEADojpHjiy50Ko0=";
       };
 
       mwb-25-07-no-ipe = {
@@ -239,8 +239,8 @@
         github = {owner ? "tek", repo, rev, hash, path ? ""}:
           fast (unbreak (nobench (notest (source.sub (config.pkgs.fetchFromGitHub { inherit owner repo rev hash; }) path))));
 
-        rev = "62f20e9cb638908c6396b7866b5f32372a722fb7";
-        hash = "sha256-zqSN0gxMJVSlskPTQhzp8Lln4fOlmrbby4NMKG+Z3sg=";
+        rev = "3cde227b7953fde0fccd1672151270fb1d168309";
+        hash = "sha256-cQFjO/ECurFyJGkiZf3J05Q5UYyy74hgnm6XTurrs0Q=";
 
         hlsPackage = path: github {
           repo = "haskell-language-server";
@@ -269,6 +269,7 @@
           hash = "sha256-rR8b2g6Req5Ssr4TtfMCNQZFqRrgG0S+pMj06KkE+q4=";
         };
 
+        generic-lens = notest;
         Diff = hackage "0.5" "13n231179wa9xm2933f328v00jb486w740yahz4qcbza4yv39w1i";
         directory-ospath-streaming = hackage "0.3" "0m0v200mgmkizm3l6pw9x9gvqx9xancgsal4z1pb7hi2pgrj0w0d";
         fourmolu = drv null;
