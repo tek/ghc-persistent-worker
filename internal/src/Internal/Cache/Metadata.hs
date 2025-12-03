@@ -6,7 +6,7 @@
 module Internal.Cache.Metadata where
 
 import Control.Concurrent (MVar, modifyMVar)
-import Control.Exception (throwIO)
+import Control.Exception (throwIO, evaluate)
 import Control.Monad (foldM, (>=>))
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.State.Strict (StateT (..), gets, modify, modifyM)
@@ -20,7 +20,18 @@ import GHC (DynFlags (..), IsBootInterface (..), ModuleName (..), mkModuleGraph)
 import GHC.Driver.Env (HscEnv (..), hscSetActiveUnitId)
 import GHC.Driver.Make (ModNodeKeyWithUid (..))
 import GHC.Driver.Session (updatePlatformConstants)
-import GHC.Unit (GenWithIsBoot (..), HomeUnit, UnitDatabase, UnitId (..), UnitState, initUnits)
+import GHC.Unit (
+  GenWithIsBoot (..),
+  HomeUnit,
+  ModuleOrigin (..),
+  UnitDatabase,
+  UnitId (..),
+  UnitState,
+  initUnits,
+  )
+import GHC.Unit
+import GHC.Types.Unique.Map
+import GHC.Utils.Trace
 import GHC.Unit.Env (HomeUnitEnv (..), UnitEnv (..), updateHug)
 import GHC.Unit.Home (GenHomeUnit (DefiniteHomeUnit))
 import GHC.Unit.Module.Graph (ModuleGraphNode (..), NodeKey (..))

@@ -110,13 +110,13 @@ nix.rules.flake(
 persistent_worker(
     name = "persistent_worker",
     visibility = ["PUBLIC"],
-    worker = ":ghc-worker",
-    # worker = ":impure_ghc_worker",
+    # worker = ":ghc-worker",
+    worker = ":impure_ghc_worker",
     worker_proxy = ":buck-proxy",
     make = config_worker_make,
+    # worker_args = ["+RTS", "-pj", "-RTS"],
     # worker_args = ["--instrument"],
-    proxy_args = ["--remain"],
-    # proxy_args = [],
+    # proxy_args = ["--remain"],
 )
 
 # impure_worker(

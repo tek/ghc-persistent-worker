@@ -12,6 +12,8 @@ flags: +mwb +mwb-25-07 +ghc-unit-index
 
 package ghc-worker
   executable-dynamic: true
+  -- profiling: true
+  -- profiling-detail: late
 
 allow-newer:
   proto-lens:*
