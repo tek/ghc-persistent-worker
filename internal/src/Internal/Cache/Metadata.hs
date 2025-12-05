@@ -19,25 +19,11 @@ import qualified GHC
 import GHC (DynFlags (..), IsBootInterface (..), ModuleName (..), mkModuleGraph)
 import GHC.Driver.Env (HscEnv (..), hscSetActiveUnitId)
 import GHC.Driver.Make (ModNodeKeyWithUid (..))
-import GHC.Driver.Session (PackageArg (..), updatePlatformConstants)
-import GHC.Unit (
-  GenWithIsBoot (..),
-  GenericUnitInfo (..),
-  HomeUnit,
-  ModuleOrigin (..),
-  PackageId (..),
-  PackageName (..),
-  UnitDatabase,
-  UnitId (..),
-  UnitState,
-  UnusableUnit (..),
-  UnusableUnitReason (..),
-  initUnits,
-  )
+import GHC.Driver.Session (updatePlatformConstants)
+import GHC.Unit (GenWithIsBoot (..), HomeUnit, UnitDatabase, UnitId (..), UnitState, initUnits)
 import GHC.Unit.Env (HomeUnitEnv (..), UnitEnv (..), updateHug)
 import GHC.Unit.Home (GenHomeUnit (DefiniteHomeUnit))
 import GHC.Unit.Module.Graph (ModuleGraphNode (..), NodeKey (..))
-import GHC.Unit.State (UnitState (..))
 import GHC.Utils.Outputable (ppr, quotes, text, (<+>))
 import Internal.DynFlags (buckLocation, parseFlags, setupPath)
 import Internal.Error (notePpr)
@@ -63,17 +49,10 @@ import System.FilePath (splitExtension)
 
 #else
 
-import Control.DeepSeq (NFData, rnf)
 import GHC.Driver.Errors.Types (GhcMessage (..))
 import GHC.Driver.Make (summariseFile)
-import GHC.Generics (Generic)
-import GHC.Types.Unique.FM (UniqFM, seqEltsUFM)
 import GHC.Unit.Env (unitEnv_insert, unitEnv_keys, unitEnv_lookup_maybe)
 import Internal.Error (eitherMessages)
-
-#if !defined(MWB)
-import GHC.Types.Unique.Set (UniqSet, getUniqSet)
-#endif
 
 #endif
 
@@ -101,57 +80,6 @@ insertHomeUnit unit dflags dbs unit_state home_unit unit_env = do
       homeUnitEnv_home_unit = Just home_unit
     }
 
-deriving stock instance Generic UnusableUnitReason
-instance NFData UnusableUnitReason
-
-deriving stock instance Generic UnusableUnit
-instance NFData UnusableUnit
-
-deriving stock instance Generic (GenericUnitInfo srcpkgid srcpkgname uid modulename mod)
-
-instance (
-  NFData srcpkgid,
-  NFData srcpkgname,
-  NFData uid,
-  NFData modulename,
-  NFData mod
-  ) => NFData (GenericUnitInfo srcpkgid srcpkgname uid modulename mod) where
-
-deriving newtype instance NFData PackageId
-deriving newtype instance NFData PackageName
-deriving newtype instance NFData UnitId
-
-instance NFData ModuleOrigin where
-  rnf = \case
-    ModHidden -> ()
-    ModUnusable _ -> ()
-    ModOrigin {..} ->
-      rnf fromOrigUnit
-      `seq`
-      rnf fromExposedReexport
-      `seq`
-      rnf fromHiddenReexport
-      `seq`
-      rnf fromPackageFlag
-      `seq`
-      ()
-
-deriving stock instance Generic UnitState
---
--- deriving anyclass instance NFData UnitState
-
-instance NFData a => NFData (UniqFM k a) where
-  rnf fm = seqEltsUFM rnf fm
-
-#if !defined(MWB)
-instance NFData a => NFData (UniqSet a) where
-  rnf fm = seqEltsUFM rnf (getUniqSet fm)
-#endif
-
-deriving stock instance Generic PackageArg
-deriving anyclass instance NFData PackageArg
-
-
 -- | Create a new home unit using the supplied 'DynFlags'.
 initHomeUnit :: DynFlags -> GHC.Logger -> UnitId -> UnitEnv -> IO UnitEnv
 initHomeUnit dflags0 logger unit unit_env = do
@@ -161,7 +89,6 @@ initHomeUnit dflags0 logger unit unit_env = do
   (dbs, unit_state, home_unit, mconstants) <- initUnits logger dflags0 Nothing allUnitIds
 #endif
   dflags1 <- updatePlatformConstants dflags0 mconstants
-  -- let !() = rnf unit_state.moduleNameProvidersMap
   insertHomeUnit unit dflags1 dbs unit_state home_unit unit_env
   where
     allUnitIds = unitEnv_keys (ue_home_unit_graph unit_env)
