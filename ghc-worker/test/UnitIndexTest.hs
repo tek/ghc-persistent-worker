@@ -1,38 +1,57 @@
 {-# LANGUAGE CPP #-}
 module UnitIndexTest where
 
+#if defined(GHC_UNIT_INDEX)
+
 import Control.Exception (catch)
 import Control.Monad (foldM)
 import Control.Monad.IO.Class (MonadIO (..))
+import Data.Foldable (toList)
+import qualified Data.List.NonEmpty as NonEmpty
+import Data.List.NonEmpty (NonEmpty)
 import qualified Data.Text as Text
 import Data.Text (Text)
-import GHC (DynFlags (homeUnitId_, packageDBFlags, packageFlags), Ghc, GhcMonad (..), HscEnv, mkModuleName)
-import GHC.Driver.DynFlags (ModRenaming (..), PackageArg (..), PackageDBFlag (..), PackageFlag (..), PkgDbRef (..))
+import GHC (
+  DynFlags (homeUnitId_, packageDBFlags, packageFlags),
+  GeneralFlag (..),
+  Ghc,
+  GhcMonad (..),
+  HscEnv,
+  ModuleName,
+  mkModuleName,
+  )
+import GHC.Driver.DynFlags (
+  ModRenaming (..),
+  PackageArg (..),
+  PackageDBFlag (..),
+  PackageFlag (..),
+  PkgDbRef (..),
+  gopt_set,
+  )
 import GHC.Driver.Env.Types (HscEnv (..))
 import GHC.Driver.Monad (modifySession)
 import GHC.Types.Unique.Map (lookupUniqMap, sizeUniqMap)
 import GHC.Unit (UnitState (..), homeUnitId, initUnits, stringToUnit, stringToUnitId, unitIdString)
 import GHC.Unit.Env (HomeUnitEnv (..), UnitEnv (..), ue_home_unit_graph, unitEnv_keys, unitEnv_lookup, unitEnv_new)
-import GHC.Utils.Outputable (hang, ppr, text, ($$))
+import GHC.Unit.State (UnitIndexQuery (..), unitIndexQuery)
+import qualified GHC.Utils.Logger as GHC
+import GHC.Utils.Outputable (hang, ppr, text, vcat)
 import Internal.Cache.Metadata (insertHomeUnit)
 import Internal.Log (dbgp, dbgs, logFlushDebug, newLogger)
 import Internal.Session (runSession)
 import Internal.State (newStateWith)
+import Internal.State.UnitIndex (newUnitIndex)
 import Prelude hiding (log)
 import System.Environment (getEnv)
 import qualified System.FilePath as FilePath
+import TestSetup (Conf (..), ModuleSpec (..), Unit (..), UnitSpec (..), withProject)
 import Types.Args (Args, emptyArgs)
 import Types.Env (Env (..))
 import Types.Log (newLog)
 import Types.State.Oneshot (OneshotCacheFeatures (..))
 
 #if defined(MWB_2025_07)
-import Data.Foldable (toList)
-import qualified Data.List.NonEmpty as NonEmpty
-import Data.List.NonEmpty (NonEmpty)
-import Internal.State.UnitIndex (newUnitIndex)
 import System.OsPath (unsafeEncodeUtf)
-import TestSetup (Conf (..), ModuleSpec (..), Unit (..), UnitSpec (..), withProject)
 #endif
 
 args :: Args
@@ -55,9 +74,13 @@ mkEnv = do
     args
   }
 
+depFlagRename :: String -> Bool -> [(ModuleName, ModuleName)] -> PackageFlag
+depFlagRename name expose rename =
+  ExposePackage ("-package " ++ name) (PackageArg name) (ModRenaming expose rename)
+
 depFlag :: String -> PackageFlag
 depFlag name =
-  ExposePackage ("-package " ++ name) (PackageArg name) (ModRenaming True [])
+  depFlagRename name True []
 
 homeDep :: Word -> [PackageFlag]
 homeDep num =
@@ -81,32 +104,51 @@ nixDb name = do
   pkg <- liftIO $ getEnv ("pkg_" ++ name)
   pure (pkg FilePath.</> "lib/ghc-9.10.1/lib/package.conf.d")
 
-showUnitState :: HomeUnitEnv -> IO ()
-showUnitState unit =
+showUnitState ::
+  HomeUnitEnv ->
+  UnitIndexQuery ->
+  IO ()
+showUnitState unit query =
   dbgp $
-  hang (ppr (maybe (text "no id") (ppr . homeUnitId) unit.homeUnitEnv_home_unit))
-  2
-  (ppr (sizeUniqMap providers) $$ ppr (lookupUniqMap providers (mkModuleName "Data.Fix")))
+  hang (ppr (maybe (text "no id") (ppr . homeUnitId) unit.homeUnitEnv_home_unit)) 2 $
+  vcat [
+    ppr (sizeUniqMap providers),
+    ppr (unitProvider "Data.Fix"),
+    ppr (unitProvider "Dep1"),
+    ppr (unitProvider "DepRenamed1"),
+    ppr (unitProvider "Data.Semigroup"),
+    ppr (origin "Data.Fix"),
+    ppr (origin "Dep1"),
+    ppr (origin "DepRenamed1"),
+    ppr (origin "Bad"),
+    ppr (origin "Data.Semigroup")
+  ]
   where
-    providers = unit.homeUnitEnv_units.moduleNameProvidersMap
+    unitProvider n = lookupUniqMap providers (mkModuleName n)
+
+    origin n = query.findOrigin state (mkModuleName n) False
+
+    providers = state.moduleNameProvidersMap
+
+    state = unit.homeUnitEnv_units
 
 addUnitType1 ::
+  GHC.Logger ->
+  DynFlags ->
   [PackageFlag] ->
   [PackageDBFlag] ->
   Word ->
   UnitEnv ->
   Word ->
-  Ghc UnitEnv
-addUnitType1 extExpose extDbs firstNumber unit_env (index :: Word) = do
-  HscEnv {hsc_logger, hsc_dflags} <- getSession
-  let dflags = hsc_dflags {homeUnitId_ = unit, packageFlags, packageDBFlags}
-  liftIO do
+  IO UnitEnv
+addUnitType1 logger dflags0 extExpose extDbs firstNumber unit_env (index :: Word) = do
+  let dflags = dflags0 {homeUnitId_ = unit, packageFlags, packageDBFlags}
 #if defined(GHC_UNIT_INDEX)
-    (dbs, unit_state, home_unit, _) <- initUnits hsc_logger dflags unit_env.ue_index Nothing allUnitIds
+  (dbs, unit_state, home_unit, _) <- initUnits logger dflags unit_env.ue_index Nothing allUnitIds
 #else
-    (dbs, unit_state, home_unit, _) <- initUnits hsc_logger dflags Nothing allUnitIds
+  (dbs, unit_state, home_unit, _) <- initUnits logger dflags Nothing allUnitIds
 #endif
-    insertHomeUnit unit dflags dbs unit_state home_unit unit_env
+  insertHomeUnit unit dflags dbs unit_state home_unit unit_env
   where
     allUnitIds = unitEnv_keys unit_env.ue_home_unit_graph
 
@@ -146,21 +188,33 @@ homeUnitCount = 1
 
 testUnitIndex ::
   [Text] ->
-  NonEmpty Unit ->
+  NonEmpty (Unit, (Bool, [(ModuleName, ModuleName)])) ->
   HscEnv ->
   Ghc ()
-testUnitIndex realDeps synthDeps HscEnv {hsc_unit_env} = do
+testUnitIndex realDeps synthDeps HscEnv {hsc_logger, hsc_dflags, hsc_unit_env} = do
   realDbs <- traverse (fmap dbFlag . nixDb) [Text.unpack (Text.replace "-" "_" n) | n <- realDeps]
-  unit_env <- foldM @[] (addUnitType1 (realDepFlags ++ synthDepFlags) (realDbs ++ synthDbs) homeUnitCount) hsc_unit_env (reverse [1..homeUnitCount])
-  let unit1 = unitEnv_lookup (stringToUnitId "unit1") unit_env.ue_home_unit_graph
-  liftIO $ showUnitState unit1
+  unit_env <- liftIO $ foldM @[] (addUnitType1 hsc_logger dflags (realDepFlags ++ synthDepFlags) (realDbs ++ synthDbs) homeUnitCount) hsc_unit_env (reverse [1..homeUnitCount])
+  let uid1 = stringToUnitId "unit1"
+      unit1 = unitEnv_lookup uid1 unit_env.ue_home_unit_graph
+  query <- unitIndexQuery uid1 unit_env.ue_index
+  liftIO $ showUnitState unit1 query
   pure ()
   where
-    realDepFlags = depFlag . Text.unpack <$> realDeps
+    realDepFlags = depFlag . Text.unpack <$> ("base" : realDeps)
 
-    synthDepFlags = [depFlag (unitIdString uid) | Unit {uid} <- toList synthDeps]
+    synthDepFlags = [uncurry (depFlagRename (unitIdString uid)) rename | (Unit {uid}, rename) <- toList synthDeps]
 
-    synthDbs = [dbFlag db | Unit {db} <- toList synthDeps]
+    synthDbs = [dbFlag db | (Unit {db}, _) <- toList synthDeps]
+
+    dflags = gopt_set hsc_dflags Opt_HideAllPackages
+
+withRenaming :: Unit -> (Unit, (Bool, [(ModuleName, ModuleName)]))
+withRenaming unit =
+  (unit, renaming unit.name)
+  where
+    renaming = \case
+      "dep1" -> (False, [(mkModuleName "Dep1", mkModuleName "DepRenamed1")])
+      _ -> (True, [])
 
 test_unitIndex :: IO ()
 test_unitIndex =
@@ -173,7 +227,9 @@ test_unitIndex =
           ue_index <- liftIO $ newUnitIndex
           modifySession \ hsc_env ->
             hsc_env {hsc_unit_env = hsc_env.hsc_unit_env {ue_index, ue_home_unit_graph = unitEnv_new []}}
-          testUnitIndex extDepNames units =<< getSession
+          testUnitIndex extDepNames (withRenaming <$> units) =<< getSession
           pure (Just ())
         logFlushDebug env.log
         pure ()
+
+#endif
