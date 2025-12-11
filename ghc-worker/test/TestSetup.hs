@@ -1,3 +1,5 @@
+{-# LANGUAGE NoFieldSelectors #-}
+
 module TestSetup where
 
 import Control.Concurrent (MVar)
@@ -6,7 +8,7 @@ import Data.Functor ((<&>))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Traversable (for)
 import GHC.Unit (UnitId, stringToUnitId, unitIdString)
-import Internal.Log (dbg)
+import Internal.State (newStateWith)
 import Prelude hiding (log)
 import System.Directory (createDirectoryIfMissing, listDirectory, withCurrentDirectory)
 import System.Environment (getEnv)
@@ -14,8 +16,9 @@ import System.FilePath ((<.>), (</>))
 import System.IO.Temp (withSystemTempDirectory)
 import System.Process.Typed (proc, runProcess_)
 import Types.Args (Args (..), TargetId (..))
-import Types.State (WorkerState (..), newStateWith)
+import Types.State (WorkerState (..))
 import Types.State.Oneshot (OneshotCacheFeatures (..))
+import Data.List (intersperse)
 
 -- | Global configuration for a worker compilation test.
 data Conf =
@@ -47,6 +50,13 @@ data ModuleSpec =
   }
   deriving stock (Eq, Show)
 
+data Reexport =
+  Reexport {
+    unit :: String,
+    moduleName :: String
+  }
+  deriving stock (Eq, Show)
+
 -- | Config for a single test home unit.
 data UnitSpec =
   UnitSpec {
@@ -57,7 +67,11 @@ data UnitSpec =
     deps :: [String],
 
     -- | The modules belonging to this unit.
-    modules :: NonEmpty ModuleSpec
+    modules :: NonEmpty ModuleSpec,
+
+    reexports :: [Reexport],
+
+    extraDbConf :: [String]
   }
   deriving stock (Eq, Show)
 
@@ -160,40 +174,66 @@ baseArgs topdir tmp =
     artifactDir a = ["-" ++ a ++ "dir", tmp </> "out"]
 
 -- | A package DB config file for the given unit.
-dbConf :: FilePath -> String -> NonEmpty Module -> String
-dbConf srcDir unit modules =
-  unlines [
+dbConf ::
+  FilePath ->
+  String ->
+  NonEmpty Module ->
+  [Reexport] ->
+  [String] ->
+  String
+dbConf srcDir unit modules reexports extra =
+  unlines $ [
     "name: " ++ unit,
     "version: 1.0",
     "id: " ++ unit,
     "key: " ++ unit,
     "import-dirs: " ++ srcDir,
     "exposed: True",
-    "exposed-modules:" ++ unwords exposed
-  ]
+    "exposed-modules: " ++ mconcat (intersperse ", " (exposed ++ (formatReexport <$> reexports)))
+  ] ++ extra
   where
     exposed = [name | Module {name} <- toList modules]
+
+    formatReexport Reexport {unit = runit, ..} =
+      moduleName ++ " from " ++ runit ++ ":" ++ moduleName
 
 -- | Write a fresh package DB without a library to the specified directory, using @ghc-pkg@ from the directory in
 -- 'Conf'.
 createDb :: Conf -> String -> String -> IO String
 createDb conf dir confFile = do
-  dbg ("create db for " ++ confFile ++ " at " ++ db)
   createDirectoryIfMissing False db
-  runProcess_ (proc ghcPkg ["--package-db", db, "recache"])
-  runProcess_ (proc ghcPkg ["--package-db", db, "register", "--force", confFile])
+  runProcess_ (proc ghcPkg ["-v0", "--package-db", db, "recache"])
+  runProcess_ (proc ghcPkg ["-v0", "--package-db", db, "register", "--force", confFile])
   pure db
   where
     db = dir </> "package.conf.d"
     ghcPkg = conf.ghcDir </> "bin/ghc-pkg"
 
--- | Create a package DB for a set of 'ModuleSpec' and assemble everything into a 'Unit'.
-createDbForUnit :: Conf -> UnitSpec -> FilePath -> NonEmpty Module -> IO FilePath
-createDbForUnit conf unit dir modules = do
-  writeFile confFile (dbConf dir unit.name modules)
+writeDb :: Conf -> UnitSpec -> FilePath -> String -> IO FilePath
+writeDb conf unit dir db = do
+  writeFile confFile db
   createDb conf dir confFile
   where
     confFile = dir </> unit.name <.> "conf"
+
+-- | Create a package DB for a set of 'ModuleSpec' and assemble everything into a 'Unit'.
+-- This is used for home units that are part of the build – like Buck, we create a package DB without any interfaces so
+-- downsweep can see dependencies.
+-- This is gonna be legacy soon, since we've changed metadata to use the actual home units instead, pending some
+-- performance optimizations.
+createEmptyHomeUnitDb :: Conf -> UnitSpec -> FilePath -> NonEmpty Module -> IO FilePath
+createEmptyHomeUnitDb conf unit dir modules =
+  writeDb conf unit dir (dbConf dir unit.name modules unit.reexports unit.extraDbConf)
+
+withTmp ::
+  (FilePath -> IO a) ->
+  IO a
+withTmp use =
+  withSystemTempDirectory "buck-worker-test" \ tmp -> do
+    withCurrentDirectory tmp do
+      for_ @[] ["src", "tmp", "out"] \ dir ->
+        createDirectoryIfMissing False (tmp </> dir)
+      use tmp
 
 -- | Set up an environment with dummy package DBs for the set of modules returned by the first argument, then run the
 -- second argument with the resulting unit configurations.
@@ -202,38 +242,35 @@ withProject ::
   (Conf -> NonEmpty Unit -> IO a) ->
   IO a
 withProject mkTargets use =
-  withSystemTempDirectory "buck-worker-test" \ tmp -> do
-    withCurrentDirectory tmp do
-      for_ @[] ["src", "tmp", "out"] \ dir ->
-        createDirectoryIfMissing False (tmp </> dir)
-      state <- newStateWith OneshotCacheFeatures {
-        loader = False,
-        enable = True,
-        names = False,
-        finder = False,
-        eps = False
+  withTmp \ tmp -> do
+    state <- newStateWith OneshotCacheFeatures {
+      loader = False,
+      enable = True,
+      names = False,
+      finder = False,
+      eps = False
+    }
+    ghcDir <- getEnv "ghc_dir"
+    libPath <- listDirectory (ghcDir </> "lib") <&> \case
+      [d] -> "lib" </> d </> "lib"
+      ds -> error ("weird GHC lib dir contains /= 1 entries: " ++ show ds)
+    let topdir = ghcDir </> libPath
+        conf = Conf {tmp, state, args0 = baseArgs topdir tmp, ..}
+    targets <- mkTargets conf
+    units <- for targets \ unit -> do
+      let dir = tmp </> "src" </> unit.name
+      createDirectoryIfMissing False dir
+      modules <- for unit.modules \ ModuleSpec {name, content} -> do
+        let src = dir </> name <.> "hs"
+        writeFile src content
+        pure Module {unit = unit.name, ..}
+      db <- createEmptyHomeUnitDb conf unit dir modules
+      pure Unit {
+        uid = stringToUnitId unit.name,
+        name = unit.name,
+        deps = unit.deps,
+        dir,
+        db,
+        modules
       }
-      ghcDir <- getEnv "ghc_dir"
-      libPath <- listDirectory (ghcDir </> "lib") <&> \case
-        [d] -> "lib" </> d </> "lib"
-        ds -> error ("weird GHC lib dir contains /= 1 entries: " ++ show ds)
-      let topdir = ghcDir </> libPath
-          conf = Conf {tmp, state, args0 = baseArgs topdir tmp, ..}
-      targets <- mkTargets conf
-      units <- for targets \ unit -> do
-        let dir = tmp </> "src" </> unit.name
-        createDirectoryIfMissing False dir
-        modules <- for unit.modules \ ModuleSpec {name, content} -> do
-          let src = dir </> name <.> "hs"
-          writeFile src content
-          pure Module {unit = unit.name, ..}
-        db <- createDbForUnit conf unit dir modules
-        pure Unit {
-          uid = stringToUnitId unit.name,
-          name = unit.name,
-          deps = unit.deps,
-          dir,
-          db,
-          modules
-        }
-      use conf units
+    use conf units

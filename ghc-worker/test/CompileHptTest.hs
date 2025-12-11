@@ -177,7 +177,9 @@ targets1 =
       deps = [],
       modules = [
         ModuleSpec "Err" errContent
-      ]
+      ],
+      reexports = [],
+      extraDbConf = []
     },
     UnitSpec {
       name = "unit-main",
@@ -185,7 +187,9 @@ targets1 =
       modules = [
         ModuleSpec "Bug" bugContent,
         ModuleSpec "Main" main1
-      ]
+      ],
+      reexports = [],
+      extraDbConf = []
     }
   ]
 
@@ -265,7 +269,9 @@ targets2 =
         modType1 'b' 1 [],
         modType1 'b' 2 [],
         modType1 'b' 3 []
-      ]
+      ],
+      reexports = [],
+      extraDbConf = []
     },
     UnitSpec {
       name = "unit-a",
@@ -274,7 +280,9 @@ targets2 =
         modType1 'a' 0 ["B2"],
         modType2 'a' 1 ["B1"] ["b1"],
         modType1 'a' 2 ["A0", "A1", "B2", "B3"]
-      ]
+      ],
+      reexports = [],
+      extraDbConf = []
     },
     UnitSpec {
       name = "unit-main",
@@ -286,7 +294,9 @@ targets2 =
           ('a', 2),
           ('b', 1)
         ])
-      ]
+      ],
+      reexports = [],
+      extraDbConf = []
     }
   ]
 

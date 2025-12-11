@@ -6,6 +6,31 @@ license: MIT
 license-file: LICENSE
 build-type: Simple
 
+flag mwb
+    description: use mwb-customized GHC
+    manual: True
+    default: False
+
+flag mwb-25-07
+    description: use mwb-customized GHC from July 2025
+    manual: True
+    default: False
+
+flag mwb-25-10
+    description: use mwb-customized GHC from October 2025
+    manual: True
+    default: False
+
+flag mwb-26-01
+    description: Use mwb-customized GHC from January 2026
+    manual: True
+    default: False
+
+flag unit-index
+    description: Convenience flag for temporary changes made in an environment-injected local GHC
+    manual: True
+    default: False
+
 common all
   ghc-options: -Wall -Widentities -Wincomplete-uni-patterns -Wmissing-deriving-strategies -Wredundant-constraints -Wunused-type-patterns -Wunused-packages
   default-language: GHC2021
@@ -24,6 +49,21 @@ common all
     TypeFamilies
   build-depends:
     base ==4.*
+
+  if (flag(mwb))
+      cpp-options: -DMWB
+
+  if (flag(mwb-25-07))
+      cpp-options: -DMWB -DMWB_2025_07
+
+  if (flag(mwb-25-10))
+      cpp-options: -DMWB -DMWB_2025_10
+
+  if (flag(mwb-26-01))
+      cpp-options: -DMWB -DMWB_2026_01
+
+  if (flag(unit-index))
+      cpp-options: -DUNIT_INDEX
 
 library
   import: all
@@ -69,7 +109,8 @@ test-suite worker-test
   hs-source-dirs: test
   other-modules:
     CompileHptTest,
-    TestSetup
+    TestSetup,
+    UnitIndexTest
   ghc-options: -threaded -rtsopts "-with-rtsopts=-N -T"
   build-depends:
     buck-worker-internal,
@@ -79,5 +120,6 @@ test-suite worker-test
     filepath,
     ghc,
     temporary,
+    text,
     transformers,
     typed-process
