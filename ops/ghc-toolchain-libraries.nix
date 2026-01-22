@@ -105,7 +105,10 @@
   "dep97"
   "dep98"
   "dep99"
+  "primitive"
   "process"
   "require-callstack"
   "template-haskell"
+  "uuid"
+  "uuid-types"
 ]

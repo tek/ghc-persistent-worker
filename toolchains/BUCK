@@ -150,3 +150,11 @@ nix.rules.flake(
     flake = "@root//:nix_overlays",
     visibility = ["PUBLIC"],
 )
+
+nix.rules.flake(
+    name = "libuuid",
+    flake = "@root//:nix_overlays",
+    lib_name = "uuid",
+    suffix = "lib",
+    visibility = ["PUBLIC"],
+)

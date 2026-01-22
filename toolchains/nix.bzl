@@ -1,14 +1,13 @@
-# HOW TO USE THIS MODULE:
-#
-#    load("//toolchains/nix.bzl", "nix")
+"""
+HOW TO USE THIS MODULE:
 
-## ---------------------------------------------------------------------------------------------------------------------
+    load("//toolchains/nix.bzl", "nix")
+"""
+
 load("@prelude//haskell:toolchain.bzl", "NativeToolchainLibrary")
 
 def __flake_impl(ctx: AnalysisContext, flake: Artifact, package: str, binary: str | None, binaries: list[str], lib_name: str | None) -> list[Provider]:
     # calls nix build path:<flake-path>#<package>
-
-    deps = [o[DefaultInfo].default_outputs[0] for o in ctx.attrs.deps]
 
     if ctx.attrs.suffix:
         out_link = ctx.actions.declare_output("out.link-{}".format(ctx.attrs.suffix))
@@ -20,6 +19,13 @@ def __flake_impl(ctx: AnalysisContext, flake: Artifact, package: str, binary: st
         "--",  # this is needed to avoid "Spawning executable `nix` failed: Failed to spawn a process"
         "nix",
         "build",
+        "--print-build-logs",
+        "--show-trace",
+        # --no-update-lock-file: if the flake.lock file does not match the flake.nix, error out.
+        # This prevents highly baffling behaviour that should be done by the user rather than by buck2.
+        "--no-update-lock-file",
+        # Don't use flake registries if someone omits something from `inputs.*` but puts it in `outputs` args.
+        "--no-use-registries",
         cmd_args("--out-link", cmd_args(out_link.as_output(), parent = 1, absolute_suffix = "/out.link"), hidden = [out_link.as_output()]),
         cmd_args(cmd_args(flake, package, delimiter = "#"), absolute_prefix = "path:"),
     ])
@@ -38,9 +44,14 @@ def __flake_impl(ctx: AnalysisContext, flake: Artifact, package: str, binary: st
         native_lib.append(
             NativeToolchainLibrary(
                 name = lib_name,
-                lib_path = cmd_args(out_link, "lib", delimiter = "/", absolute_prefix = "-L"),
+                lib_root = out_link,
+                rel_path_to_root = "lib",
             ),
         )
+
+    nix_dynamic_info = NixDynamicInfo(
+        dynamic = _read_out_link(ctx, out_link),
+    )
 
     sub_targets = {
         bin: [DefaultInfo(default_output = out_link), RunInfo(args = cmd_args(out_link, "bin", bin, delimiter = "/"))]
@@ -52,6 +63,13 @@ def __flake_impl(ctx: AnalysisContext, flake: Artifact, package: str, binary: st
             default_output = out_link,
             sub_targets = sub_targets,
         ),
+        # Note: This is just a path to the `bin` directory, it doesn't actually
+        # have to exist!
+        BinDirInfo(
+            args = cmd_args(out_link, "bin", delimiter = "/"),
+        ),
+        # absolute nix path information will be recorded here. It is a dynamic value.
+        nix_dynamic_info,
     ] + run_info + native_lib
 
 __flake = rule(
@@ -67,12 +85,104 @@ __flake = rule(
     },
 )
 
+def _read_out_link_dynamic_impl(
+        # starlark-lint-disable unused-argument
+        actions: AnalysisActions,  # @unused
+        read_link):
+    nix_path = read_link.read_string()
+    return [NixPathInfo(path = nix_path)]
+
+_read_out_link_dynamic = dynamic_actions(
+    impl = _read_out_link_dynamic_impl,
+    attrs = {
+        "read_link": dynattrs.artifact_value(),
+    },
+)
+
+# FIXME(jadel): this is duplicate logic as in haskell/mercury_haskell.bzl. Needs to be DRY'd up eventually.
+def _read_out_link(ctx: AnalysisContext, out_link: Artifact) -> DynamicValue:
+    read_link = ctx.actions.declare_output("read_link")
+    ctx.actions.run(
+        cmd_args("bash", "-ec", """readlink $1 | tr -d '\\n' > $2""", "--", out_link, read_link.as_output()),
+        category = "nix_path",
+        local_only = True,
+    )
+
+    dyn_nix_path = ctx.actions.dynamic_output_new(_read_out_link_dynamic(
+        read_link = read_link,
+    ))
+
+    return dyn_nix_path
+
+BinDirInfo = provider(
+    doc = """Provides the path of the `/bin` directory of a derivation output.""",
+    fields = {
+        "args": provider_field(cmd_args),
+    },
+)
+
+# FIXME(jadel): Unify with a dynamic for `NixDynamicDepsTset`.
+NixDynamicInfo = provider(
+    doc = """Provides nix-side dynamic information. Contains a NixPathInfo provider.""",
+    fields = {
+        "dynamic": DynamicValue,
+    },
+)
+
+NixDynamicDepsTset = provider(
+    doc = """Provides nix-side dynamic information. Contains a NixDepsTsetProvider provider.""",
+    fields = {
+        "dynamic": DynamicValue,
+    },
+)
+
+NixPathInfo = provider(
+    doc = """Provides the absolute /nix/store path.""",
+    fields = {
+        "path": str,
+    },
+)
+
+# All of the output paths for a derivation.
+NixDerivationInfo = record(
+    derivation = NixPathInfo,
+    outputs = dict[str, NixPathInfo],
+)
+
+def _project_path(path: NixDerivationInfo) -> list[str]:
+    return [out.path for out in path.outputs.values()]
+
+# All Nix output paths referenced by this target including transitively.
+# Contains elements of type NixDerivationInfo.
+# Does not keep track of outputs separately (FIXME?) and we just ref-scan for *all* output paths and prune afterwards.
+NixDepsTset = transitive_set(json_projections = {"all_output_paths": _project_path})
+
+NixDepsTsetProvider = provider(
+    doc = """Provides a NixDepsTset.""",
+    fields = {
+        "deps": NixDepsTset,
+    },
+)
+
+# One Nix package, effectively; with *buck2-level* Nix dependency info.
+# The dependencies are not a comprehensive list of all of the dependencies at a
+# Nix level and these will likely mirror the Nix level dependency structure to
+# a degree.
+# The Nix-level transitive closure of NixDepsTset here should include all possible Nix
+# deps of the final target.
+#
+# The dependencies should include the package itself; this is only a packaging
+# of the two parts together for convenience.
+NixDependency = record(
+    package = NixDerivationInfo,
+    deps = NixDepsTset,
+)
+
 ## ---------------------------------------------------------------------------------------------------------------------
 
 nix = struct(
     rules = struct(
         flake = __flake,
     ),
-    macros = struct(
-    ),
+    macros = struct(),
 )

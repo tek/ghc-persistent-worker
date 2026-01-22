@@ -618,6 +618,7 @@
       snappy-c = force;
       time-manager = hackage "0.2.2" "1ja8pimvy07b05ifkrg6q0lzs3kh0k2dmncwjdxl81199r559vf5";
       tls = hackage "2.1.6" "11rxsmwhv6g4298a0355v6flz4n6gw64qw3iha7z0ka3nv7vq4vv";
+      uuid = force;
     };
 
     package-sets.mwb-26-01 = {

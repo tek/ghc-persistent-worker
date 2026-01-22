@@ -33,6 +33,7 @@ in {
   };
   bash = pkgs.bash-buck;
   python = pkgs.python3;
+  libuuid = pkgs.libuuid.lib;
   ghc = hsPkgs.ghc;
   ghc-worker-buck = workerPkgs.ghc-worker;
   buck-proxy-buck = workerPkgs.buck-proxy;
