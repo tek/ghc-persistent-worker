@@ -1,0 +1,126 @@
+module Internal.BuildPlan.Json where
+
+import qualified Data.Aeson as Aeson
+import Data.Coerce (coerce)
+import Data.Map (Map)
+import qualified Data.Map.Merge.Strict as Map
+import Data.Map.Merge.Strict (dropMissing, mapMissing, preserveMissing, zipWithMatched)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+import Data.Set (Set)
+import GHC.Unit.Module (ModuleName (..), UnitId)
+import qualified System.File.OsPath as OsPath
+import System.OsPath (OsPath)
+import Types.Args (BuildPlanField (..))
+import Types.BuildPlan (
+  BuildPlan (..),
+  BuildPlanJson (..),
+  BuildPlanModule (..),
+  BuildPlanSchema (..),
+  ModuleKey (..),
+  PackageDep (..),
+  PackageDeps (..),
+  PackageKey (..),
+  )
+import Types.CachedDeps (CachedModule (..), CachedPackageDep (..), JsonFs (..))
+
+--- | Modules available for import downstream.
+fieldExposedModules :: Map ModuleKey BuildPlanModule -> [ModuleKey]
+fieldExposedModules =
+  Map.keys
+  .
+  Map.filter \ BuildPlanModule {boot} -> not boot
+
+-- | Dependencies within the current unit, including boot files indicated by the suffix @-boot@.
+fieldModuleGraph :: Map ModuleKey BuildPlanModule -> Map ModuleKey [ModuleKey]
+fieldModuleGraph =
+  fmap \ BuildPlanModule {modules, modulesBoot} -> (fst <$> modules) <> (fst <$> modulesBoot)
+
+-- | Dependencies on other home units.
+fieldPackageDeps :: Map ModuleKey BuildPlanModule -> PackageDeps
+fieldPackageDeps =
+  PackageDeps
+  .
+  fmap \ BuildPlanModule {packages} ->
+    Map.fromList [(name, modules) | PackageDep {name, modules} <- packages]
+
+-- | Modules with TH extensions enabled.
+fieldThModules :: Map ModuleKey BuildPlanModule -> [ModuleKey]
+fieldThModules =
+  coerce
+  .
+  Map.keys
+  .
+  Map.filter \ BuildPlanModule {thEnabled} -> thEnabled
+
+-- | Dependencies within the current unit, including boot files indicated by the suffix @-boot@.
+fieldCache ::
+  Map ModuleKey (Map UnitId (PackageKey, [ModuleName])) ->
+  Map ModuleKey BuildPlanModule ->
+  Map ModuleKey CachedModule
+fieldCache =
+  Map.merge dropMissing (mapMissing (basic [])) (zipWithMatched combine)
+  where
+    combine key deps bpMod = basic (toolchainDeps deps) key bpMod
+
+    toolchainDeps deps =
+      [
+        CachedPackageDep {id = JsonFs unit, modules = coerce modules}
+        | (unit, (_, modules)) <- Map.toList deps
+      ]
+
+    -- TODO do we need boot deps here?
+    basic toolchain _ BuildPlanModule {source, modules, packages} =
+      CachedModule {
+        source,
+        modules = (snd <$> modules),
+        packages = [CachedPackageDep {id = dep.id, modules = dep.modules} | dep <- packages] ++ toolchain
+      }
+
+fieldLegacy ::
+  Map ModuleKey (Map UnitId (PackageKey, [ModuleName])) ->
+  Map ModuleKey BuildPlanModule ->
+  Map ModuleKey BuildPlanModule
+fieldLegacy =
+  Map.merge dropMissing preserveMissing (zipWithMatched combine)
+  where
+    combine _ deps BuildPlanModule {..} = BuildPlanModule {packages = packages ++ toolchainDeps deps, ..}
+
+    toolchainDeps deps =
+      [
+        PackageDep {id = JsonFs unit, name, modules = coerce modules}
+        | (unit, (name, modules)) <- Map.toList deps
+      ]
+
+-- | Create the final payload of the build plan JSON.
+-- Include only the fields selected on the command line by the option @--fields@.
+assembleFields ::
+  Set BuildPlanField ->
+  Map ModuleKey (Map UnitId (PackageKey, [ModuleName])) ->
+  Map ModuleKey BuildPlanModule ->
+  BuildPlanJson
+assembleFields fields toolchainDeps modules =
+  BuildPlanJson {
+    legacy = fieldIf FieldLegacy (fieldLegacy toolchainDeps modules),
+    schema = BuildPlanSchema {
+      exposed_modules = fieldIf FieldExposedModules (fieldExposedModules modules),
+      module_graph = fieldIf FieldModuleGraph (fieldModuleGraph modules),
+      package_deps = fieldIf FieldPackageDeps (toolchainDepsPayload <> projectDeps),
+      project_deps = fieldIf FieldProjectDeps projectDeps,
+      toolchain_deps = fieldIf FieldToolchainDeps toolchainDepsPayload,
+      th_modules = fieldIf FieldThModules (fieldThModules modules),
+      cache = fieldIf FieldCache (fieldCache toolchainDeps modules)
+    }
+  }
+  where
+    projectDeps = fieldPackageDeps modules
+
+    toolchainDepsPayload = coerce (fmap (Map.fromList . Map.elems) toolchainDeps)
+
+    fieldIf :: forall a . BuildPlanField -> a -> Maybe a
+    fieldIf key value = if Set.member key fields then Just value else Nothing
+
+-- | Write a JSON file for the given build plan.
+writeBuildPlan :: OsPath -> BuildPlan -> IO ()
+writeBuildPlan path BuildPlan {json} =
+  OsPath.writeFile path (Aeson.encode json)
