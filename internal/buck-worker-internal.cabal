@@ -125,6 +125,7 @@ test-suite internal-test
     BuildPlanTest,
     CompileHptTest,
     ProjectBuildTest,
+    ResourceTest,
     ScheduleTest,
     Test.Build,
     Test.BuildSystem,
@@ -147,6 +148,9 @@ test-suite internal-test
     Test.ProjectBuild.Classify,
     Test.ProjectBuild.Property,
     Test.Resume,
+    Test.Resource.Build,
+    Test.Resource.Project,
+    Test.Resource.Stats,
     Test.Run,
     Test.Scheduler,
     Test.Source,
@@ -176,3 +180,4 @@ test-suite internal-test
     text,
     time,
     typed-process
+
