@@ -4,6 +4,7 @@ module Main where
  
 import BuildPlanTest (test_buildPlan)
 import IncrementalMetadataTest (test_incremental)
+import ProfileTest (test_profiling)
 import ProjectBuildTest (test_projectBuild)
 import ResourceTest (test_resources)
 import ScheduleTest (test_sortScheduleOrder)
@@ -46,7 +47,8 @@ tests :: TestTree
 tests =
   testGroup "all" [
     test_resources,
-    afterResources (testGroup "general" testsGeneral)
+    afterResources (testGroup "general" testsGeneral),
+    afterResources test_profiling
   ]
   where
     -- tasty 1.5 has @sequentialTestGroup@, but the current Nix env has 1.4, so we'll make do with this for now.

@@ -94,6 +94,7 @@ test-suite ghc-worker-test
     BuildPlanTest,
     FlagParserTest,
     IncrementalMetadataTest,
+    ProfileTest,
     ProjectBuildTest,
     ResourceTest,
     ScheduleTest
