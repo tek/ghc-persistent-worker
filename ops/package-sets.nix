@@ -122,6 +122,14 @@ in {
 
   envs.profiled = defaultEnv [({notest, ...}: { ghc-worker = notest; ghc-server = notest; })];
 
+  envs.profiled-linkables = latestEnv [
+    ({notest, ...}: { ghc-worker = notest; ghc-server = notest; })
+  ] // {
+    hls.enable = lib.mkForce false;
+    package-set.extends = "profiled-linkables";
+    profiling = true;
+  };
+
   envs.ghc914 = {
     expose.scoped = true;
     package-set.extends = "ghc914";
@@ -204,6 +212,10 @@ in {
       };
       ghc-server = notest nodoc;
     };
+  };
+
+  package-sets.profiled-linkables = {
+    extends = "mwb-26-07-linkables";
   };
 
   package-sets.mercury-ghc9141 = {
