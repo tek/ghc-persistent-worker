@@ -421,6 +421,12 @@
           default = false;
         };
 
+        fixed-nodes = {
+          description = "GHC contains the patch for fixed module graph nodes";
+          manual = true;
+          default = false;
+        };
+
       };
 
       when = [
@@ -439,6 +445,10 @@
         {
           condition = "flag(unit-index)";
           cpp-options = ["-DUNIT_INDEX"];
+        }
+        {
+          condition = "flag(fixed-nodes)";
+          cpp-options = ["-DFIXED_NODES"];
         }
       ];
 
