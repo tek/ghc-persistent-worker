@@ -55,8 +55,6 @@
           "ghc-paths"
           "ghc-worker-test-common"
           "hedgehog"
-          "lens"
-          "mtl"
           "tasty"
           "tasty-hedgehog"
           "text"
@@ -256,7 +254,6 @@
           "extra"
           "file-io"
           "filepath"
-          "generic-lens"
           "ghc"
           "ghc-paths"
           "hedgehog"
@@ -267,6 +264,7 @@
           "temporary"
           "text"
           "time"
+          "stm"
           "typed-process"
         ];
         source-dirs = "lib";
@@ -304,6 +302,7 @@
           "file-io"
           "filepath"
           "ghc"
+          "ghc-worker-test-common"
           "grapesy"
           "optparse-applicative"
           "stm"
