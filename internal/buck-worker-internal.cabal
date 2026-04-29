@@ -84,6 +84,7 @@ library
                       Internal.Compile.Oneshot
                       Internal.Debug
                       Internal.DynFlags
+                      Internal.FastDynFlags
                       Internal.Env
                       Internal.Error
                       Internal.Log
