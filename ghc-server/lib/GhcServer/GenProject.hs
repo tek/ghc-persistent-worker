@@ -1,12 +1,22 @@
 -- | Generate a synthetic binary-tree multi-unit Haskell project for ghc-server testing.
 --
+-- === Deep mode (original)
+--
 -- The generated project has a binary tree of modules. Two tree levels are grouped into
 -- two units, split horizontally (left half of modules in one unit, right half in another).
 --
 -- At level @l@, there are @2^(l+1)@ modules. Each module at level @l@, index @i@ imports
 -- two children at @(l+1, 2*i)@ and @(l+1, 2*i+1)@. Leaf modules have no imports.
 --
--- The CLI depth argument @d@ produces @2*d@ levels.
+-- The CLI depth argument @d@ produces @2*d@ levels and @2*d@ units.
+-- Module count grows exponentially.
+--
+-- === Wide mode
+--
+-- A binary tree of /units/, each with a fixed number of modules.
+-- Depth @d@ produces @2^d - 1@ units (e.g. depth 10 = 1023 units).
+-- Each non-leaf unit depends on its two children.
+-- Module 0 of each unit imports module 0 from both child units.
 module GhcServer.GenProject where
 
 import Data.Aeson (encode)
@@ -188,4 +198,77 @@ writeModuleSource root depth modMap m = do
       mName = moduleName m.unitIndex m.modNumber
       dir = root ++ "/" ++ uName
       source = moduleSource depth modMap m
+  writeFile (dir ++ "/" ++ mName ++ ".hs") source
+
+-- ---------------------------------------------------------------------------
+-- Wide mode: binary tree of units with fixed module count
+-- ---------------------------------------------------------------------------
+
+-- | Total number of units in a wide binary tree: @2^depth - 1@.
+wideUnitCount :: Int -> Int
+wideUnitCount depth = 2 ^ depth - 1
+
+-- | The two child unit indices for a given unit in a 1-indexed binary heap layout.
+-- Unit 1 is the root. Children of unit @i@ are @2*i@ and @2*i+1@.
+-- Returns empty list for leaf units.
+wideUnitChildren :: Int -> Int -> [Int]
+wideUnitChildren totalUnits' uid
+  | left > totalUnits' = []
+  | otherwise = [left, right]
+  where
+    left = 2 * uid
+    right = 2 * uid + 1
+
+-- | Generate the source for a module in wide mode.
+--
+-- Module 0 of each non-leaf unit imports @val_0@ from both child units' module 0.
+-- All other modules are standalone.
+wideModuleSource :: Int -> Int -> Int -> [Int] -> String
+wideModuleSource uid mid modsPerUnit childUids =
+  unlines $
+    ["module " ++ moduleName uid mid ++ " where"]
+    ++ importLines
+    ++ [""]
+    ++ [valName ++ " :: Int"]
+    ++ [valName ++ " = " ++ valueExpr]
+  where
+    valName = "val_" ++ show mid
+
+    importLines
+      | mid == 0 =
+          [ "import qualified " ++ moduleName cu 0
+          | cu <- childUids
+          ]
+      | otherwise = []
+
+    childRef cu = moduleName cu 0 ++ ".val_0"
+
+    valueExpr
+      | mid == 0, not (null childUids) =
+          intercalate " + " (map childRef childUids) ++ " + 1"
+      | otherwise = show (uid * modsPerUnit + mid)
+
+-- | Write a wide-mode project to disk.
+writeWideProject :: FilePath -> Int -> Int -> IO ()
+writeWideProject root depth modsPerUnit = do
+  let total = wideUnitCount depth
+  traverse_ (writeWideUnit root total modsPerUnit) ([1 .. total] :: [Int])
+
+-- | Write a single unit directory for wide mode.
+writeWideUnit :: FilePath -> Int -> Int -> Int -> IO ()
+writeWideUnit root totalUnits' modsPerUnit uid = do
+  let uName = unitName uid
+      dir = root ++ "/" ++ uName
+      children' = wideUnitChildren totalUnits' uid
+      deps = map unitName children'
+      config = UnitConfig {deps, args = []}
+  createDirectoryIfMissing True dir
+  LBS.writeFile (dir ++ "/unit.json") (encode config)
+  traverse_ (writeWideModule dir uid modsPerUnit children') ([0 .. modsPerUnit - 1] :: [Int])
+
+-- | Write a single module source file for wide mode.
+writeWideModule :: FilePath -> Int -> Int -> [Int] -> Int -> IO ()
+writeWideModule dir uid modsPerUnit childUids mid = do
+  let mName = moduleName uid mid
+      source = wideModuleSource uid mid modsPerUnit childUids
   writeFile (dir ++ "/" ++ mName ++ ".hs") source
