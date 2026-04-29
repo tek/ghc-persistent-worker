@@ -96,6 +96,17 @@ in {
 
   envs.profiled = defaultEnv [({notest, ...}: { ghc-worker = notest; ghc-server = notest; })];
 
+  envs.profiled-fixed = {
+    hls.enable = lib.mkForce false;
+    package-set.extends = "mwb-26-04-fixed";
+    overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache" "fixed-nodes"] ++ [
+      ({notest, ...}: { ghc-worker = notest; ghc-server = notest; })
+    ] ++ [
+      ipeOverrides
+    ];
+    profiling = true;
+  };
+
   envs.profiled-25-10 = let
 
     overrides = {notest, ...}: {

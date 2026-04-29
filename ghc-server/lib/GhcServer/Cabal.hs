@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 -- | Parse Cabal package descriptions to discover units for the standalone GHC server.
 --
 -- Each library component (main library and sub-libraries) becomes a 'Unit'.
@@ -21,6 +22,9 @@ import Distribution.Types.LibraryName (LibraryName (..))
 import Distribution.Types.PackageName (unPackageName)
 import Distribution.Types.UnqualComponentName (unUnqualComponentName)
 import Distribution.Utils.Path (getSymbolicPath)
+#if MIN_VERSION_Cabal(3,14,0)
+import Distribution.Utils.Path (makeSymbolicPath)
+#endif
 import Distribution.Verbosity (silent)
 import GHC.Data.Graph.Directed (graphFromEdgedVerticesOrd)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..), mkUnitCache)
@@ -150,7 +154,11 @@ discoverCabalProject logger projectRoot outputDir tmpDir = do
       fail ("No .cabal file found in: " ++ root)
     Just f -> pure f
   logger.info ("Loading project configuration from " ++ cabalFile)
+#if MIN_VERSION_Cabal(3,14,0)
+  gpd <- readGenericPackageDescription silent Nothing (makeSymbolicPath cabalFile)
+#else
   gpd <- readGenericPackageDescription silent cabalFile
+#endif
   let pkgName = unPackageName (packageName gpd)
       locals = localLibNames pkgName gpd
   units <- sequence $
