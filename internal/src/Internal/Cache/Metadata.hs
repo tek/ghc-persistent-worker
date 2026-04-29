@@ -26,11 +26,13 @@ import GHC.Unit.Home (GenHomeUnit (DefiniteHomeUnit))
 import GHC.Unit.Module.Graph (ModuleGraphNode (..), NodeKey (..))
 import GHC.Utils.Outputable (ppr, quotes, text, (<+>))
 import Internal.DynFlags (buckLocation, parseFlags, setupPath)
+import Internal.FastDynFlags (parseFlagsFast)
 import Internal.Log (logDebugD, logTimed, logTimedD)
 import Internal.State (updateMakeState)
 import qualified Internal.State.Make as Make
 import Internal.State.Make (insertUnitEnv, storeModuleGraph)
 import Internal.UnitEnv (emptyHomePackageTable)
+import System.IO (hPutStrLn, stderr)
 import Types.BuckArgs (CachedBuckArgs (..), parseCachedBuckArgs)
 import Types.CachedDeps (
   CachedBuildPlan (..),
@@ -206,9 +208,9 @@ readParseGHCArgs ::
   DynFlags ->
   FilePath ->
   IO DynFlags
-readParseGHCArgs hsc_env0 dflags0 args_file = do
+readParseGHCArgs _hsc_env0 dflags0 args_file = do
   args <- readFile args_file
-  (dflags1, _, _, _) <- parseFlags dflags0 hsc_env0.hsc_logger (buckLocation <$> lines args)
+  let (dflags1, _leftover) = parseFlagsFast dflags0 (lines args)
   pure dflags1
 
 -- | Restore the unit state and module graph from the external cache.
