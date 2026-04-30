@@ -64,8 +64,8 @@ data Build =
 -- Starts the scheduler loop in a background thread.  The loop classifies requests
 -- and dispatches tasks.  Metadata completion triggers resolution and promotion
 -- of pending compile tasks via the 'propagate' callback.
-newBuild :: Int -> BuildEnv -> IO Build
-newBuild maxJobs buildEnv = do
+newBuild :: Int -> Int -> BuildEnv -> IO Build
+newBuild maxJobs taskTimeout buildEnv = do
   let cache = mkBuildCache buildEnv.outputDir buildEnv.project
   cachedUnits <- cache.cachedUnits
   scheduler <- newSchedulerState emptyBuildExt
@@ -77,7 +77,7 @@ newBuild maxJobs buildEnv = do
         classify = classifyBuildRequest cachedUnits buildEnv,
         propagate = propagateCompletion cache buildEnv
       },
-      taskTimeout = 300,
+      taskTimeout,
       mkFailure = id,
       continueOnFailure = True
     }
@@ -111,9 +111,9 @@ stopBuild cb = do
 -- Creates a scheduler, submits one batch, waits for completion, then cancels
 -- the scheduler thread.  For persistent schedulers, use 'newBuild',
 -- 'scheduleBatch', and 'awaitBuild' directly.
-runBuild :: Int -> BuildEnv -> ScheduleRequest -> IO BuildResult
-runBuild maxJobs env schedule = do
-  cb <- newBuild maxJobs env
+runBuild :: Int -> Int -> BuildEnv -> ScheduleRequest -> IO BuildResult
+runBuild maxJobs taskTimeout env schedule = do
+  cb <- newBuild maxJobs taskTimeout env
   scheduleBatch cb schedule
   stopBuild cb
 

@@ -140,7 +140,7 @@ serverHandler config = do
       log,
       events
     }
-  cb <- newBuild config.maxJobs env
+  cb <- newBuild config.maxJobs 300 env
   pure $ GrpcHandler \ _commandEnv (RequestArgs argv) ->
     case parseScheduleArgs project argv of
       Left err ->
