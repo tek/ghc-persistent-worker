@@ -24,9 +24,11 @@ import Test.BuildTest (
   eventCompiled,
   eventCompiledUnits,
   eventMetadata,
+  testTaskTimeout,
+  timedBuild,
   writeProjectFile,
   )
-import Test.Tasty (TestName, TestTree, testGroup, withResource)
+import Test.Tasty (DependencyType (..), TestName, TestTree, dependentTestGroup, testGroup, withResource)
 import Test.Tasty.Hedgehog (testProperty)
 import Types.Args (emptyArgs)
 
@@ -59,7 +61,7 @@ cabalProjectTest dirName create name body =
 
 -- | Run a fresh build with the given schedule steps.
 runCabalFresh :: TestProject -> [(UnitName, UnitRequest)] -> IO ([BuildEvent], GhcServer.Build.BuildResult)
-runCabalFresh tp steps = do
+runCabalFresh tp steps = timedBuild do
   stateVar <- newBuildState
   log <- newLogger False
   events <- newBuildEvents
@@ -73,7 +75,7 @@ runCabalFresh tp steps = do
         log,
         events
       }
-  result <- runBuild 4 env ScheduleRequest {steps, recompile = False, rebuild = False}
+  result <- runBuild 4 testTaskTimeout env ScheduleRequest {steps, recompile = False, rebuild = False}
   evs <- readEvents events
   pure (evs, result)
 
@@ -272,7 +274,7 @@ test_cabalLargeDiscovery =
 
 test_cabalTests :: TestTree
 test_cabalTests =
-  testGroup "Cabal project support"
+  dependentTestGroup "Cabal project support" AllFinish
     [ test_cabalDiscovery
     , test_cabalBuildAll
     , test_cabalLargeBuild

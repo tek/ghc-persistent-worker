@@ -55,7 +55,7 @@
           "ghc-paths"
           "ghc-worker-test-common"
           "hedgehog"
-          "tasty"
+          "tasty >= 1.5"
           "tasty-hedgehog"
           "text"
         ];

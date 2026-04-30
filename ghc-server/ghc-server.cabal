@@ -149,6 +149,6 @@ test-suite ghc-server-test
     ghc,
     ghc-server,
     hedgehog,
-    tasty,
+    tasty >= 1.5,
     tasty-hedgehog,
     temporary

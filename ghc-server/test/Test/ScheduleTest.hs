@@ -7,17 +7,24 @@ import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC (ModuleName, mkModuleName, moduleNameString)
-
 import GHC.Unit.Module.Graph (ModNodeKeyWithUid (..), ModuleGraphNode (..), NodeKey (..))
 import GHC.Unit.Types (GenWithIsBoot (..), IsBootInterface (..), UnitId, stringToUnitId)
-import Hedgehog (TestT, property, test, withTests, (===))
-import Test.Tasty (TestName, TestTree, testGroup)
-import Test.Tasty.Hedgehog (testProperty)
-
-import GhcServer.Build.Schedule (BuildStatus (..), ModuleInfo (..), ModuleKey (..), Resolutions, TaskKey (..), nodeDepsToTaskKeys, resolveFromCachedUnit, resolutionsFromModuleMap)
+import GhcServer.Build.Schedule (
+  BuildStatus (..),
+  ModuleInfo (..),
+  ModuleKey (..),
+  Resolutions,
+  TaskKey (..),
+  nodeDepsToTaskKeys,
+  resolutionsFromModuleMap,
+  resolveFromCachedUnit,
+  )
 import GhcServer.Data.Unit (UnitName (..))
 import GhcServer.Path (osPath)
 import GhcServer.Scheduler (Phase (..))
+import Hedgehog (TestT, property, test, withTests, (===))
+import Test.Tasty (DependencyType (..), TestName, TestTree, dependentTestGroup, testGroup)
+import Test.Tasty.Hedgehog (testProperty)
 import Types.CachedDeps (CachedModule (..), CachedPackageDep (..), CachedUnit (..), JsonFs (..))
 
 -- ---------------------------------------------------------------------------
@@ -355,8 +362,8 @@ test_resolveCachedCrossUnitMissing =
 
 test_schedule :: TestTree
 test_schedule =
-  testGroup "GhcServer.Build.Schedule"
-    [ testGroup "nodeDepsToTaskKeys"
+  dependentTestGroup "GhcServer.Build.Schedule" AllFinish
+    [ dependentTestGroup "nodeDepsToTaskKeys" AllFinish
         [ test_nodeDepsNoDeps
         , test_nodeDepsHomeDep
         , test_nodeDepsExternalDepsExcluded
@@ -364,7 +371,7 @@ test_schedule =
         , test_nodeDepsNotHome
         , test_nodeDepsMultiUnit
         ]
-    , testGroup "resolveFromCachedUnit"
+    , dependentTestGroup "resolveFromCachedUnit" AllFinish
         [ test_resolveCachedNoDeps
         , test_resolveCachedIntraDep
         , test_resolveCachedCrossUnitDep

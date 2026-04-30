@@ -4,9 +4,17 @@ module Test.SchedulerTest where
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
-import GhcServer.Scheduler (Phase (..), SchedulerState (..), Task (..), addResolutions, insertPending, promote, promoteEnabled)
+import GhcServer.Scheduler (
+  Phase (..),
+  SchedulerState (..),
+  Task (..),
+  addResolutions,
+  insertPending,
+  promote,
+  promoteEnabled,
+  )
 import Hedgehog (TestT, property, test, withTests, (===))
-import Test.Tasty (TestName, TestTree, testGroup)
+import Test.Tasty (DependencyType (..), TestName, TestTree, dependentTestGroup, testGroup)
 import Test.Tasty.Hedgehog (testProperty)
 
 -- ---------------------------------------------------------------------------
@@ -344,8 +352,8 @@ test_addResolutionsPromotesPending =
 
 test_scheduler :: TestTree
 test_scheduler =
-  testGroup "GhcServer.Scheduler"
-    [ testGroup "promote"
+  dependentTestGroup "GhcServer.Scheduler" AllFinish
+    [ dependentTestGroup "promote" AllFinish
         [ test_promoteSingleNoDeps
         , test_promoteWithUnmetDep
         , test_promoteDepAlreadyCompleted
@@ -356,15 +364,15 @@ test_scheduler =
         , test_promoteAlreadyAccepted
         , test_promoteUpdatesAccepted
         ]
-    , testGroup "promoteEnabled"
+    , dependentTestGroup "promoteEnabled" AllFinish
         [ test_promoteEnabledSkipsDisabled
         , test_promoteEnabledNoResolution
         , test_promoteEnabledTransitive
         ]
-    , testGroup "addResolutions"
+    , dependentTestGroup "addResolutions" AllFinish
         [ test_addResolutionsPromotesPending
         ]
-    , testGroup "insertPending"
+    , dependentTestGroup "insertPending" AllFinish
         [ test_insertPendingMergesEnabled
         , test_insertPendingResolvesImmediately
         ]
