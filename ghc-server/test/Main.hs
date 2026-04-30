@@ -5,11 +5,11 @@ import Test.CabalTest (test_cabalTests)
 import Test.CacheTest (test_depLoadOrder)
 import Test.ScheduleTest (test_schedule)
 import Test.SchedulerTest (test_scheduler)
-import Test.Tasty (TestTree, defaultMain, testGroup)
+import Test.Tasty (DependencyType (..), TestTree, defaultMain, dependentTestGroup, testGroup)
 
 tests :: TestTree
 tests =
-  testGroup "ghc-server" [test_serverBuild, test_cabalTests, test_depLoadOrder, test_schedule, test_scheduler]
+  dependentTestGroup "ghc-server" AllFinish [test_serverBuild, test_cabalTests, test_depLoadOrder, test_schedule, test_scheduler]
 
 main :: IO ()
 main = defaultMain tests

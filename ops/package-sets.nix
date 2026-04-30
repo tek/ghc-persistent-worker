@@ -231,6 +231,7 @@ in {
     flatparse = hackage "0.5.2.0" "06qncwbrwxpx877xxxq01zap3l33ln7ab5v3jr70mb2h5j6v97ck";
     serialise = force;
     snappy-c = force;
+    tasty = hackage "1.5.4" "0x6khif6n0rzfgkvrbiagg1sj0lwmjfr6qarjnjwmb9ywdk7598b";
     tasty-hedgehog = force;
     time-manager = hackage "0.2.2" "1ja8pimvy07b05ifkrg6q0lzs3kh0k2dmncwjdxl81199r559vf5";
     tls = hackage "2.1.6" "11rxsmwhv6g4298a0355v6flz4n6gw64qw3iha7z0ka3nv7vq4vv";
@@ -256,6 +257,8 @@ in {
         rev = "f6f0ea80314ae97a550229c95b15333566c35fe0";
         hash = "sha256-R3HKHj6+btPodhOyeW50xvZwFqF1IaN3+6dHN9KLjmw=";
       };
+
+      ghc-server = notest nodoc;
     };
   };
 
