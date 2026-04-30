@@ -1,4 +1,4 @@
-{util, ...}: let
+{config, lib, util, ...}: let
 
   inherit (util) build;
 
@@ -7,6 +7,13 @@
   profiledServerPkg = build.packages.profiled.ghc-server.package;
   profiledFixedPkg = build.packages.profiled-fixed.ghc-server.package;
   profiteur = build.envs.tools.toolchain.packages.profiteur;
+
+  # Prebuilt ext dep packages for the mwb-26-04-fixed GHC, used by profiling apps.
+  fixedExtDeps = import ./test-ext-deps.nix {
+    inherit (config) pkgs;
+    inherit lib;
+    ghc = build.envs.mwb-26-04-fixed.toolchain.packages.ghc;
+  };
 
   setupProject = ''
   project=$(mktemp -d --tmpdir ghc-server-test.XXXXXXXX)
@@ -135,6 +142,7 @@ in {
     depth=''${1-2}
     project=$(mktemp -d --tmpdir profile-cache-restore.XXXXXXXX)
     echo "Creating ''$(($depth * 2))-level test project at $project"
+    export resource_test_ext_deps=${fixedExtDeps}
     ${fixedServerPkg}/bin/gen-project $project $depth
 
     ${cleanup}
@@ -188,6 +196,7 @@ in {
     depth=''${1-3}
     project=$(mktemp -d --tmpdir profile-cache-meta.XXXXXXXX)
     echo "Creating project with depth=$depth at $project"
+    export resource_test_ext_deps=${fixedExtDeps}
     ${serverPkg}/bin/gen-project $project $depth
 
     ${cleanup}
@@ -253,6 +262,7 @@ in {
     mods_per_unit=''${2-3}
     project=$(mktemp -d --tmpdir profile-cache-wide.XXXXXXXX)
 
+    export resource_test_ext_deps=${fixedExtDeps}
     ${fixedServerPkg}/bin/gen-project --wide $project $depth $mods_per_unit
 
     ${cleanup}

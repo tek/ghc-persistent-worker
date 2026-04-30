@@ -1,6 +1,7 @@
 module Test.Cache where
 
 import qualified Data.Aeson as Aeson
+import qualified Data.ByteString.Char8 as B8
 import Data.Foldable (toList)
 import Data.List (partition)
 import qualified Data.List.NonEmpty as NonEmpty
@@ -45,7 +46,7 @@ import Types.CachedDeps (
 writeUnitArgs :: OsPath -> [String] -> UnitKey -> IO FilePath
 writeUnitArgs tempDir ghcOptions unit = do
   createDirectoryIfMissing True dir
-  writeFile argsFile (unlines ghcOptions)
+  B8.writeFile argsFile (B8.unlines (map B8.pack ghcOptions))
   pure argsFile
   where
     dir = tempDir </> unitCacheDir unit

@@ -4,6 +4,10 @@
 -- Replaces 'GHC.parseDynamicFlags' with direct 'DynFlags' field updates,
 -- avoiding the O(n*m) flag table scan in 'GHC.Driver.CmdLine.processArgs'.
 --
+-- Uses flatparse to operate directly on 'ByteString', avoiding String
+-- allocation for the input.  String conversion happens only at the GHC
+-- API boundary (DynFlags fields that require 'String').
+--
 -- Only handles the flags that appear in cached unit args files.
 -- Unknown flags trigger 'error' \u2013 the caller should verify that all flags
 -- used by Buck are covered here.
@@ -11,18 +15,78 @@ module Internal.FastDynFlags (
   parseFlagsFast,
 ) where
 
+import Data.ByteString (ByteString)
+import qualified Data.ByteString.Char8 as B8
+import FlatParse.Basic (Parser, Result (..), byteString, runParser, takeRest, eof, (<|>), byteStringOf)
+import GHC.Data.OsPath (unsafeEncodeUtf)
 import GHC.Driver.DynFlags (
   DynFlags (..),
   GeneralFlag (..),
   GhcLink (..),
   ModRenaming (..),
   PackageArg (..),
+  PackageDBFlag (..),
   PackageFlag (..),
+  PkgDbRef (..),
   gopt_set,
   gopt_unset,
   )
 import GHC.Platform.Ways (Way (..), addWay, wayGeneralFlags, wayUnsetGeneralFlags)
 import GHC.Unit.Types (stringToUnit, stringToUnitId)
+
+-- | A parsed flag with its effect on 'DynFlags'.
+data Flag
+  = FlagNoArg (DynFlags -> DynFlags)
+  -- ^ A standalone flag that modifies 'DynFlags' directly.
+  | FlagOneArg (ByteString -> DynFlags -> DynFlags)
+  -- ^ A flag that consumes the next line as its argument.
+  | FlagSource ByteString
+  -- ^ A source file path (non-flag positional argument).
+
+-- | Parse a single line as a flag.
+--
+-- Tries each known flag prefix in turn.  Unknown flags starting with @-@
+-- trigger 'error'; other lines are treated as source file paths.
+parseLine :: Parser () Flag
+parseLine =
+  noArgFlag "-hide-all-packages" (gopt_set `flip` Opt_HideAllPackages)
+  <|> noArgFlag "-include-pkg-deps" (\d -> d {depIncludePkgDeps = True})
+  <|> noArgFlag "-no-link" (\d -> d {ghcLink = NoLink})
+  <|> noArgFlag "-dynamic" addWayDyn
+  <|> noArgFlag "-fbyte-code-and-object-code" (gopt_set `flip` Opt_ByteCodeAndObjectCode)
+  <|> noArgFlag "-fprefer-byte-code" (gopt_set `flip` Opt_UseBytecodeRatherThanObjects)
+  <|> noArgFlag "-fPIC" (gopt_set `flip` Opt_PIC)
+  <|> noArgFlag "-i" (\d -> d {importPaths = []})
+  <|> oneArgFlag "-osuf" (\v d -> d {objectSuf_ = v})
+  <|> oneArgFlag "-hisuf" (\v d -> d {hiSuf_ = v})
+  <|> oneArgFlag "-odir" (\v d -> d {objectDir = Just v})
+  <|> oneArgFlag "-hidir" (\v d -> d {hiDir = Just v})
+  <|> oneArgFlag "-stubdir" (\v d -> d {stubDir = Just v})
+  <|> oneArgFlag "-this-unit-id" (\v d -> d {homeUnitId_ = stringToUnitId v})
+  <|> oneArgFlag "-dep-makefile" (\_v d -> d)
+  <|> oneArgFlag "-tmpdir" (\_v d -> d)
+  <|> oneArgFlag "-package-db" addPackageDB
+  <|> oneArgFlag "-package-id" (\v d -> addExpose d ("-package-id " ++ v) (UnitIdArg (stringToUnit v)))
+  <|> oneArgFlag "-package" (\v d -> addExpose d ("-package " ++ v) (PackageArg v))
+  <|> sourceOrUnknown
+
+-- | Match a standalone flag (no argument).
+noArgFlag :: ByteString -> (DynFlags -> DynFlags) -> Parser () Flag
+noArgFlag name f = FlagNoArg f <$ (byteString name *> eof)
+{-# inline noArgFlag #-}
+
+-- | Match a flag that expects the next line as its argument.
+oneArgFlag :: ByteString -> (String -> DynFlags -> DynFlags) -> Parser () Flag
+oneArgFlag name f = FlagOneArg (\bs -> f (B8.unpack bs)) <$ (byteString name *> eof)
+{-# inline oneArgFlag #-}
+
+-- | A non-flag line (source file) or an unrecognized flag.
+sourceOrUnknown :: Parser () Flag
+sourceOrUnknown = do
+  line <- byteStringOf takeRest
+  case B8.uncons line of
+    Just ('-', _) -> error ("Internal.FastDynFlags: unrecognized flag: " ++ B8.unpack line)
+    _ -> pure (FlagSource line)
 
 -- | Parse cached GHC CLI args by directly updating 'DynFlags' fields.
 --
@@ -30,53 +94,36 @@ import GHC.Unit.Types (stringToUnit, stringToUnitId)
 -- scan through hundreds of flag definitions.  It supports only the flags known
 -- to appear in cached unit args files written by Buck / the standalone server.
 --
--- Source file arguments (positional args) are collected and returned as the
--- second component.
-parseFlagsFast :: DynFlags -> [String] -> (DynFlags, [String])
-parseFlagsFast dflags0 args =
+-- Operates directly on the raw 'ByteString' content of the args file
+-- (newline-delimited).  Source file arguments (positional args) are collected
+-- and returned as the second component.
+parseFlagsFast :: DynFlags -> ByteString -> (DynFlags, [ByteString])
+parseFlagsFast dflags0 input =
   let dflags1 = dflags0 {ghcLink = LinkBinary, verbosity = 0}
-  in go dflags1 args []
-
--- | Recursive arg processor.
-go :: DynFlags -> [String] -> [String] -> (DynFlags, [String])
-go dflags [] leftover = (dflags, reverse leftover)
-go dflags (arg : rest) leftover = case arg of
-  -- No-argument flags
-  "-hide-all-packages"          -> go (gopt_set dflags Opt_HideAllPackages) rest leftover
-  "-include-pkg-deps"           -> go (dflags {depIncludePkgDeps = True}) rest leftover
-  "-no-link"                    -> go (dflags {ghcLink = NoLink}) rest leftover
-  "-dynamic"                    -> go (addWayDyn dflags) rest leftover
-  "-fbyte-code-and-object-code" -> go (gopt_set dflags Opt_ByteCodeAndObjectCode) rest leftover
-  "-fprefer-byte-code"          -> go (gopt_set dflags Opt_UseBytecodeRatherThanObjects) rest leftover
-  "-fPIC"                       -> go (gopt_set dflags Opt_PIC) rest leftover
-  "-i"                          -> go (dflags {importPaths = []}) rest leftover
-
-  -- Flags with one argument
-  "-osuf"         -> withArg rest \v r -> go (dflags {objectSuf_ = v}) r leftover
-  "-hisuf"        -> withArg rest \v r -> go (dflags {hiSuf_ = v}) r leftover
-  "-odir"         -> withArg rest \v r -> go (dflags {objectDir = Just v}) r leftover
-  "-hidir"        -> withArg rest \v r -> go (dflags {hiDir = Just v}) r leftover
-  "-stubdir"      -> withArg rest \v r -> go (dflags {stubDir = Just v}) r leftover
-  "-this-unit-id" -> withArg rest \v r -> go (dflags {homeUnitId_ = stringToUnitId v}) r leftover
-  "-dep-makefile" -> withArg rest \_v r -> go dflags r leftover  -- ignored
-  "-tmpdir"       -> withArg rest \_v r -> go dflags r leftover  -- tmpDir type varies; usually not needed for cache
-
-  "-package"      -> withArg rest \v r -> go (addExpose dflags "-package" (PackageArg v)) r leftover
-  "-package-id"   -> withArg rest \v r -> go (addExpose dflags "-package-id" (UnitIdArg (stringToUnit v))) r leftover
-
-  -- Non-flag arguments (source files)
-  ('-' : _)       -> error ("Internal.FastDynFlags: unrecognized flag: " ++ arg)
-  _               -> go dflags rest (arg : leftover)
-
--- | Consume the next argument for a flag that requires one.
-withArg :: [String] -> (String -> [String] -> a) -> a
-withArg [] _ = error "Internal.FastDynFlags: flag requires an argument"
-withArg (v : rest) k = k v rest
+      linesBs = B8.lines input
+  in go dflags1 linesBs []
+  where
+    go dflags [] leftover = (dflags, reverse leftover)
+    go dflags (line : rest) leftover
+      | B8.null line = go dflags rest leftover
+      | otherwise = case runParser parseLine line of
+          OK (FlagNoArg f) _ -> go (f dflags) rest leftover
+          OK (FlagOneArg f) _ -> case rest of
+            [] -> error "Internal.FastDynFlags: flag requires an argument"
+            (arg : rest') -> go (f arg dflags) rest' leftover
+          OK (FlagSource src) _ -> go dflags rest (src : leftover)
+          Fail -> error ("Internal.FastDynFlags: failed to parse flag: " ++ B8.unpack line)
+          Err () -> error ("Internal.FastDynFlags: error parsing flag: " ++ B8.unpack line)
 
 -- | Add an 'ExposePackage' flag to 'DynFlags'.
 addExpose :: DynFlags -> String -> PackageArg -> DynFlags
 addExpose dflags doc pkgArg =
   dflags {packageFlags = ExposePackage doc pkgArg (ModRenaming True []) : packageFlags dflags}
+
+-- | Append a @-package-db@ entry, mirroring 'addPkgDbRef' in @GHC.Driver.Session@.
+addPackageDB :: String -> DynFlags -> DynFlags
+addPackageDB path dflags =
+  dflags {packageDBFlags = PackageDB (PkgDbPath (unsafeEncodeUtf path)) : packageDBFlags dflags}
 
 -- | Add 'WayDyn' to the target ways and apply associated general flag changes.
 addWayDyn :: DynFlags -> DynFlags

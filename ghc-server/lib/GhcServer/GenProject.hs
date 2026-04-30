@@ -27,6 +27,34 @@ import qualified Data.Map.Strict as Map
 import GhcServer.Data.UnitConfig (UnitConfig (..))
 import System.Directory (createDirectoryIfMissing)
 
+-- | Configuration for external dependency packages in generated projects.
+data ExtDepsConfig =
+  ExtDepsConfig {
+    -- | Root directory containing prebuilt ext dep packages (e.g. from @test-ext-deps.nix@).
+    extDepsDir :: FilePath,
+    -- | Which ext dep indexes to use (e.g. @[0..4]@).
+    extDepIndexes :: [Int]
+  }
+  deriving stock (Show)
+
+-- | Naming conventions matching @Test.Path@ and @test-ext-deps.nix@.
+extDepName :: Int -> String
+extDepName i = "extdep" ++ show i
+
+extDepModuleName :: Int -> String
+extDepModuleName i = "Extdep" ++ show i
+
+extDepValueName :: Int -> String
+extDepValueName i = "extdep_value_" ++ show i
+
+-- | GHC CLI args to make ext dep packages visible: @-package-db@ and @-package@ per ext dep.
+extDepArgs :: ExtDepsConfig -> [String]
+extDepArgs cfg =
+  concatMap perDep cfg.extDepIndexes
+  where
+    perDep i = ["-package-db", cfg.extDepsDir ++ "/" ++ extDepName i ++ "/package.conf.d",
+                "-package", extDepName i]
+
 -- ---------------------------------------------------------------------------
 -- Tree geometry
 -- ---------------------------------------------------------------------------
@@ -144,11 +172,12 @@ buildModuleMap depth =
     ]
 
 -- | Generate the Haskell source for a module.
-moduleSource :: Int -> Map.Map (Int, Int) (Int, Int) -> TreeModule -> String
-moduleSource depth modMap m =
+moduleSource :: Int -> Map.Map (Int, Int) (Int, Int) -> Maybe ExtDepsConfig -> TreeModule -> String
+moduleSource depth modMap extDeps m =
   unlines $
     ["module " ++ modName ++ " where"]
     ++ importLines
+    ++ extDepImports
     ++ [""]
     ++ [valueName ++ " :: Int"]
     ++ [valueName ++ " = " ++ valueExpr]
@@ -163,41 +192,55 @@ moduleSource depth modMap m =
     importLines =
       ["import " ++ moduleName cu cm ++ " (" ++ childValue cu cm ++ ")" | (cu, cm) <- childMods]
 
+    -- Leaf modules import ext deps so that ext dep packages are actually exercised
+    isLeaf = null childMods
+    extDepImports = case extDeps of
+      Just cfg | isLeaf ->
+        ["import " ++ extDepModuleName i ++ " (" ++ extDepValueName i ++ ")" | i <- cfg.extDepIndexes]
+      _ -> []
+
+    extDepValues = case extDeps of
+      Just cfg | isLeaf -> [extDepValueName i | i <- cfg.extDepIndexes]
+      _ -> []
+
+    allValues = [childValue cu cm | (cu, cm) <- childMods] ++ extDepValues
+
     valueExpr
-      | null childMods = "1"
-      | otherwise = intercalate " + " [childValue cu cm | (cu, cm) <- childMods] ++ " + 1"
+      | null allValues = "1"
+      | otherwise = intercalate " + " allValues ++ " + 1"
 
 -- ---------------------------------------------------------------------------
 -- Project writing
 -- ---------------------------------------------------------------------------
 
 -- | Write the entire project to disk.
-writeProject :: FilePath -> Int -> IO ()
-writeProject root depth = do
+writeProject :: FilePath -> Int -> Maybe ExtDepsConfig -> IO ()
+writeProject root depth extDeps = do
   let modMap = buildModuleMap depth
       mods = allModules depth
       numUnits = totalUnits depth
   -- Create unit directories and write unit.json files
-  traverse_ (writeUnitDir root depth) ([0 .. numUnits - 1] :: [Int])
+  traverse_ (writeUnitDir root depth extDeps) ([0 .. numUnits - 1] :: [Int])
   -- Write module source files
-  traverse_ (writeModuleSource root depth modMap) mods
+  traverse_ (writeModuleSource root depth modMap extDeps) mods
 
 -- | Create a unit directory with its @unit.json@.
-writeUnitDir :: FilePath -> Int -> Int -> IO ()
-writeUnitDir root depth unitIdx = do
+writeUnitDir :: FilePath -> Int -> Maybe ExtDepsConfig -> Int -> IO ()
+writeUnitDir root depth extDeps unitIdx = do
   let dir = root ++ "/" ++ unitName unitIdx
   createDirectoryIfMissing True dir
   let deps = unitDeps depth unitIdx
-      config = UnitConfig {deps = map unitName deps, args = []}
+      args = maybe [] extDepArgs extDeps
+      config = UnitConfig {deps = map unitName deps, args}
   LBS.writeFile (dir ++ "/unit.json") (encode config)
 
 -- | Write a single module's source file.
-writeModuleSource :: FilePath -> Int -> Map.Map (Int, Int) (Int, Int) -> TreeModule -> IO ()
-writeModuleSource root depth modMap m = do
+writeModuleSource :: FilePath -> Int -> Map.Map (Int, Int) (Int, Int) -> Maybe ExtDepsConfig -> TreeModule -> IO ()
+writeModuleSource root depth modMap extDeps m = do
   let uName = unitName m.unitIndex
       mName = moduleName m.unitIndex m.modNumber
       dir = root ++ "/" ++ uName
-      source = moduleSource depth modMap m
+      source = moduleSource depth modMap extDeps m
   writeFile (dir ++ "/" ++ mName ++ ".hs") source
 
 -- ---------------------------------------------------------------------------
@@ -222,12 +265,14 @@ wideUnitChildren totalUnits' uid
 -- | Generate the source for a module in wide mode.
 --
 -- Module 0 of each non-leaf unit imports @val_0@ from both child units' module 0.
+-- Leaf unit's module 0 imports ext dep values when ext deps are configured.
 -- All other modules are standalone.
-wideModuleSource :: Int -> Int -> Int -> [Int] -> String
-wideModuleSource uid mid modsPerUnit childUids =
+wideModuleSource :: Int -> Int -> Int -> Maybe ExtDepsConfig -> [Int] -> String
+wideModuleSource uid mid modsPerUnit extDeps childUids =
   unlines $
     ["module " ++ moduleName uid mid ++ " where"]
     ++ importLines
+    ++ extDepImports
     ++ [""]
     ++ [valName ++ " :: Int"]
     ++ [valName ++ " = " ++ valueExpr]
@@ -241,34 +286,48 @@ wideModuleSource uid mid modsPerUnit childUids =
           ]
       | otherwise = []
 
+    isLeaf = null childUids
+    extDepImports = case extDeps of
+      Just cfg | mid == 0, isLeaf ->
+        ["import " ++ extDepModuleName i ++ " (" ++ extDepValueName i ++ ")" | i <- cfg.extDepIndexes]
+      _ -> []
+
+    extDepValues = case extDeps of
+      Just cfg | mid == 0, isLeaf -> [extDepValueName i | i <- cfg.extDepIndexes]
+      _ -> []
+
     childRef cu = moduleName cu 0 ++ ".val_0"
 
+    childValues = map childRef childUids
+    allValues = childValues ++ extDepValues
+
     valueExpr
-      | mid == 0, not (null childUids) =
-          intercalate " + " (map childRef childUids) ++ " + 1"
+      | mid == 0, not (null allValues) =
+          intercalate " + " allValues ++ " + 1"
       | otherwise = show (uid * modsPerUnit + mid)
 
 -- | Write a wide-mode project to disk.
-writeWideProject :: FilePath -> Int -> Int -> IO ()
-writeWideProject root depth modsPerUnit = do
+writeWideProject :: FilePath -> Int -> Int -> Maybe ExtDepsConfig -> IO ()
+writeWideProject root depth modsPerUnit extDeps = do
   let total = wideUnitCount depth
-  traverse_ (writeWideUnit root total modsPerUnit) ([1 .. total] :: [Int])
+  traverse_ (writeWideUnit root total modsPerUnit extDeps) ([1 .. total] :: [Int])
 
 -- | Write a single unit directory for wide mode.
-writeWideUnit :: FilePath -> Int -> Int -> Int -> IO ()
-writeWideUnit root totalUnits' modsPerUnit uid = do
+writeWideUnit :: FilePath -> Int -> Int -> Maybe ExtDepsConfig -> Int -> IO ()
+writeWideUnit root totalUnits' modsPerUnit extDeps uid = do
   let uName = unitName uid
       dir = root ++ "/" ++ uName
       children' = wideUnitChildren totalUnits' uid
       deps = map unitName children'
-      config = UnitConfig {deps, args = []}
+      args = maybe [] extDepArgs extDeps
+      config = UnitConfig {deps, args}
   createDirectoryIfMissing True dir
   LBS.writeFile (dir ++ "/unit.json") (encode config)
-  traverse_ (writeWideModule dir uid modsPerUnit children') ([0 .. modsPerUnit - 1] :: [Int])
+  traverse_ (writeWideModule dir uid modsPerUnit extDeps children') ([0 .. modsPerUnit - 1] :: [Int])
 
 -- | Write a single module source file for wide mode.
-writeWideModule :: FilePath -> Int -> Int -> [Int] -> Int -> IO ()
-writeWideModule dir uid modsPerUnit childUids mid = do
+writeWideModule :: FilePath -> Int -> Int -> Maybe ExtDepsConfig -> [Int] -> Int -> IO ()
+writeWideModule dir uid modsPerUnit extDeps childUids mid = do
   let mName = moduleName uid mid
-      source = wideModuleSource uid mid modsPerUnit childUids
+      source = wideModuleSource uid mid modsPerUnit extDeps childUids
   writeFile (dir ++ "/" ++ mName ++ ".hs") source

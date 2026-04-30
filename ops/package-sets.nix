@@ -228,6 +228,7 @@ in {
     proto-lens-protoc = force (hackage "0.9.0.0" "18b0hz5z4cfimnbhjnhdk4lf2r0wy5aardngdhyy8aqvr62v5r62");
     proto-lens-runtime = force;
     proto-lens-setup = force;
+    flatparse = hackage "0.5.2.0" "06qncwbrwxpx877xxxq01zap3l33ln7ab5v3jr70mb2h5j6v97ck";
     serialise = force;
     snappy-c = force;
     tasty-hedgehog = force;

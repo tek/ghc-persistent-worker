@@ -15,6 +15,8 @@ import Control.Monad (filterM, foldM)
 import Control.Monad.Extra (whenMaybeM)
 import qualified Data.Aeson as Aeson
 import Data.Aeson (eitherDecodeFileStrict')
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as B8
 import Data.Functor ((<&>))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -75,7 +77,7 @@ writeUnitCache _logger unitCache depPlans buildPlanPath ghcOptions =
 
     writeAll = do
       createDirectoryIfMissing True unitCache.dir
-      writeFile unitCache.unitArgsPath (unlines ghcOptions)
+      BS.writeFile unitCache.unitArgsPath (B8.unlines (map B8.pack ghcOptions))
       depsFile <- writeDepUnits unitCache depPlans
       writeCachedUnit unitCache depsFile buildPlanFp
 
