@@ -10,6 +10,7 @@ import Control.Monad (foldM, (>=>))
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.State.Strict (StateT (..), modify, modifyM)
 import Data.Aeson (eitherDecodeFileStrict')
+import qualified Data.ByteString as BS
 import Data.Foldable (fold, traverse_)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust)
@@ -73,6 +74,18 @@ import Internal.Error (eitherMessages)
 
 useFixedNodes :: Bool
 useFixedNodes = True
+
+-- | Switch between the custom flatparse-based flag parser and GHC's
+-- 'parseDynamicFlags'.
+--
+-- When 'True', cached unit args are parsed via 'parseFlagsFast'
+-- (see "Internal.FastDynFlags"), which only supports the flag set
+-- written to cache files but avoids the O(n*m) flag table scan.
+--
+-- When 'False', the GHC flag parser is used.  This exists for A/B
+-- profiling comparisons.
+useFastFlagParser :: Bool
+useFastFlagParser = True
 
 -- | Add a fresh 'HomeUnitEnv' to the home unit graph using the supplied unit state and dependencies.
 insertHomeUnit ::
@@ -208,10 +221,15 @@ readParseGHCArgs ::
   DynFlags ->
   FilePath ->
   IO DynFlags
-readParseGHCArgs _hsc_env0 dflags0 args_file = do
-  args <- readFile args_file
-  let (dflags1, _leftover) = parseFlagsFast dflags0 (lines args)
-  pure dflags1
+readParseGHCArgs hsc_env0 dflags0 args_file
+  | useFastFlagParser = do
+      args <- BS.readFile args_file
+      let (dflags1, _leftover) = parseFlagsFast dflags0 args
+      pure dflags1
+  | otherwise = do
+      args <- readFile args_file
+      (dflags1, _, _, _) <- parseFlags dflags0 hsc_env0.hsc_logger (buckLocation <$> lines args)
+      pure dflags1
 
 -- | Restore the unit state and module graph from the external cache.
 --
