@@ -135,7 +135,7 @@ writeMetadata path fieldSelection srcs = do
       hsc_env <- getSession
       writeLegacyMakefile hsc_env
       depJson <- resolveDepJson hsc_env path
-      plan <- buildPlanForSources fields srcs
+      plan <- buildPlanForSources fields path srcs
       liftIO $ writeBuildPlan depJson plan
       pure plan.graph
   where

@@ -39,6 +39,7 @@ library
     Types.BuildPlan
     Types.CachedDeps
     Types.Env
+    Types.Incremental
     Types.GhcHandler
     Types.Grpc
     Types.Instrument

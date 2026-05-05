@@ -9,6 +9,7 @@ import GHC.Types.Error (mkUnknownDiagnostic)
 #endif
 
 import Control.Monad (unless)
+import Data.Aeson (eitherDecodeFileStrict')
 import Data.Either (partitionEithers)
 import Data.Foldable (toList)
 import Data.List.NonEmpty (NonEmpty (..), groupAllWith)
@@ -38,9 +39,13 @@ import GHC.Unit.Module.Graph (ModuleGraph, ModuleGraphNode (..), NodeKey (..), m
 import GHC.Unit.Module.ModSummary (ModSummary (..), isBootSummary, msHsFilePath, ms_mod_name, ms_unitid)
 import GHC.Utils.Error (isEmptyMessages)
 import Internal.BuildPlan.External (packageName, unitImports)
+import Internal.BuildPlan.Incremental (incrementalTargets, loadCachedGraph, mergeModuleGraphs, writeIncrementalState)
 import Internal.BuildPlan.Json (assembleFields)
+import System.Environment (lookupEnv)
 import System.FilePath (splitExtension)
+import System.OsPath (OsPath)
 import Types.Args (BuildPlanField (..))
+import Types.Incremental (ActionMetadata)
 import Types.BuildPlan (
   BuildPlan (..),
   BuildPlanEnv (..),
@@ -332,8 +337,80 @@ buildPlanForTargets fields targets = do
 buildPlanForSources ::
   GhcMonad m =>
   Set BuildPlanField ->
+  Maybe OsPath ->
   [FilePath] ->
   m BuildPlan
-buildPlanForSources fields srcs = do
+buildPlanForSources fields mbBuildPlan srcs = do
+  case mbBuildPlan of
+    Just buildPlan -> do
+      result <- liftIO $ incrementalTargets buildPlan srcs
+      case result of
+        Just (changed, meta) -> do
+          plan <- buildPlanIncremental fields buildPlan changed srcs
+          liftIO $ writeIncrementalState buildPlan meta
+          pure plan
+        Nothing -> do
+          plan <- buildPlanFull fields srcs
+          liftIO $ writeIncrementalStateFromSources buildPlan srcs
+          pure plan
+    Nothing -> buildPlanFull fields srcs
+
+-- | Full downsweep targeting all sources.
+buildPlanFull ::
+  GhcMonad m =>
+  Set BuildPlanField ->
+  [FilePath] ->
+  m BuildPlan
+buildPlanFull fields srcs = do
   targets <- for srcs \ src -> GHC.guessTarget src Nothing Nothing
   buildPlanForTargets fields targets
+
+-- | Write incremental state when no previous state existed (first run).
+writeIncrementalStateFromSources :: OsPath -> [FilePath] -> IO ()
+writeIncrementalStateFromSources buildPlan srcs = do
+  lookupEnv "ACTION_METADATA" >>= \case
+    Nothing -> pure ()
+    Just metaPath ->
+      eitherDecodeFileStrict' metaPath >>= \case
+        Left _ -> pure ()
+        Right meta -> writeIncrementalState buildPlan meta
+
+-- | Incremental build plan: pre-load cached graph, downsweep only changed sources, merge.
+--
+-- We only target changed files in downsweep, which produces fresh nodes with correct deps.
+-- Unchanged modules are retained from the cached graph with their original dep structure.
+-- We pass old summaries from the cache (for timestamp optimization) but NOT the graph cache
+-- (which would prevent downsweep from re-visiting imported modules).
+buildPlanIncremental ::
+  GhcMonad m =>
+  Set BuildPlanField ->
+  OsPath ->
+  [FilePath] ->
+  [FilePath] ->
+  m BuildPlan
+buildPlanIncremental fields buildPlan changed allSources
+  | null changed = do
+    -- Nothing changed: run full build (rare edge case)
+    buildPlanFull fields allSources
+  | otherwise = do
+    hsc_env0 <- getSession
+    mbCachedGraph <- liftIO $ loadCachedGraph hsc_env0 buildPlan
+    case mbCachedGraph of
+      Nothing -> buildPlanFull fields allSources
+      Just cachedGraph -> do
+        -- Target only changed sources
+        targets <- traverse (\ src -> GHC.guessTarget src Nothing Nothing) changed
+        GHC.setTargets targets
+        -- Run downsweep with old summaries (for timestamp optimization) but WITHOUT
+        -- the graph cache (so downsweep fully processes imported modules like M11)
+        (errs, freshGraph) <- withSession \ hsc_env -> liftIO do
+          let oldSummaries = mgModSummaries cachedGraph
+          downsweepCompat hsc_env oldSummaries Nothing [] True
+        let msgs = unionManyMessages errs
+        unless (isEmptyMessages msgs) $ throwErrors (fmap GhcDriverMessage msgs)
+        -- Merge: fresh nodes (changed modules + their transitive imports from downsweep)
+        -- take precedence over cached nodes
+        let graph = mergeModuleGraphs freshGraph cachedGraph
+        hsc_env <- getSession
+        json <- liftIO $ buildPlanModules fields hsc_env graph
+        pure BuildPlan {graph, json}
