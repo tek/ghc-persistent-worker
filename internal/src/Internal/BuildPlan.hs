@@ -384,7 +384,7 @@ buildPlanForTargets fields targets = do
 -- When 'False', always runs full downsweep.
 -- Flip for A/B profiling comparisons.
 useIncrementalMetadata :: Bool
-useIncrementalMetadata = True
+useIncrementalMetadata = False
 
 buildPlanForSources ::
   GhcMonad m =>
