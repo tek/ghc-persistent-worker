@@ -246,7 +246,8 @@ toGhcArgs args = do
     ghcOptions = ghcArgs ++ foldMap packageDbArg packageDb ++ foldMap packageDbArg args.buck2PackageDb,
     cachedBuildPlans,
     cachedDeps,
-    homeUnit = args.homeUnit
+    homeUnit = args.homeUnit,
+    actionMetadata = args.env !? "ACTION_METADATA"
   }
   where
     packageDbArg path = ["-package-db", path]

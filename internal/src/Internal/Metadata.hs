@@ -124,10 +124,11 @@ resolveDepJson hsc_env path =
 writeMetadata ::
   Logger ->
   Maybe OsPath ->
+  Maybe FilePath ->
   Maybe (NonEmpty BuildPlanField) ->
   [String] ->
   Ghc ModuleGraph
-writeMetadata logger path fieldSelection srcs = do
+writeMetadata logger path actionMetadata fieldSelection srcs = do
   initializeSessionPlugins
   withTempSession metadataTempSession do
     if legacyMkDepend
@@ -136,7 +137,7 @@ writeMetadata logger path fieldSelection srcs = do
       hsc_env <- getSession
       writeLegacyMakefile hsc_env
       depJson <- resolveDepJson hsc_env path
-      plan <- buildPlanForSources logger fields path srcs
+      plan <- buildPlanForSources logger fields path actionMetadata srcs
       liftIO $ writeBuildPlan depJson plan
       pure plan.graph
   where
@@ -166,7 +167,7 @@ computeMetadata env = do
         unit <- prepareMetadataSession env dflags
         let target = TargetUnit (UnitTarget unit)
         liftIO $ env.log.setTarget target
-        module_graph <- writeMetadata env.log env.args.buildPlan env.args.fields (fst <$> srcs)
+        module_graph <- writeMetadata env.log env.args.buildPlan env.args.actionMetadata env.args.fields (fst <$> srcs)
         liftIO do
           updateMakeStateVar env.state (storeModuleGraph module_graph)
           for_ dflags.stubDir \ stubdir -> do
@@ -181,4 +182,4 @@ computeMetadata env = do
 proxyMetadata :: Env -> IO Bool
 proxyMetadata env =
   fmap isJust $ runSession env $ withGhcInSession env \ srcs ->
-    Just () <$ writeMetadata env.log env.args.buildPlan env.args.fields (fst <$> srcs)
+    Just () <$ writeMetadata env.log env.args.buildPlan env.args.actionMetadata env.args.fields (fst <$> srcs)

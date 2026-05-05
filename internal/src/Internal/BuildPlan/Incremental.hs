@@ -43,17 +43,12 @@ import GHC.Driver.Make (summariseFile)
 import Internal.Error (eitherMessages)
 #endif
 import System.Directory (doesFileExist)
-import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
 import qualified System.OsPath as OsPath
 import System.OsPath (OsPath)
 import Types.BuildPlan (BuildPlanJson (..), BuildPlanSchema (..), PackageDeps (..))
 import Types.CachedDeps (CachedModule (..), CachedPackageDep (..), CachedUnit (..), JsonFs (..))
 import Types.Incremental (ActionMetadata, IncrementalState (..), actionMetadataSourceDigests, changedSources)
-
--- | The environment variable name that Buck uses to communicate the metadata file path.
-actionMetadataEnvVar :: String
-actionMetadataEnvVar = "ACTION_METADATA"
 
 -- | Derive the incremental state file path from the build plan path.
 --
@@ -77,10 +72,11 @@ stateFilePath buildPlanPath =
 -- previous run for unchanged modules.
 incrementalTargets ::
   OsPath ->
+  Maybe FilePath ->
   [FilePath] ->
   IO (Maybe ([FilePath], ActionMetadata, Maybe BuildPlanJson))
-incrementalTargets buildPlan _allSources = do
-  lookupEnv actionMetadataEnvVar >>= \case
+incrementalTargets buildPlan actionMetadata _allSources =
+  case actionMetadata of
     Nothing -> pure Nothing
     Just metaPath -> do
       eitherDecodeFileStrict' metaPath >>= \case
@@ -215,9 +211,19 @@ loadCachedGraphNode hsc_env unit (JsonFs modName) CachedModule {source, modules,
 
 #else
 
-loadCachedGraphNode hsc_env unit (JsonFs _modName) CachedModule {source} = do
+loadCachedGraphNode hsc_env unit (JsonFs _modName) CachedModule {source, modules, packages} = do
   summResult <- summariseFile hsc_env (DefiniteHomeUnit unit Nothing) mempty source Nothing Nothing
   summary <- eitherMessages GhcDriverMessage summResult
-  pure (ModuleNode [] summary)
+  pure (ModuleNode (homeDeps ++ packageDeps) summary)
+  where
+    homeDeps =
+      [NodeKey_Module (ModNodeKeyWithUid (GWIB depName NotBoot) unit) | JsonFs depName <- modules]
+
+    packageDeps =
+      [
+        NodeKey_Module (ModNodeKeyWithUid (GWIB depName NotBoot) depUnit)
+        | CachedPackageDep {id = JsonFs depUnit, modules = depModules} <- packages
+        , JsonFs depName <- depModules
+      ]
 
 #endif

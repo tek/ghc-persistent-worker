@@ -48,7 +48,6 @@ import Internal.BuildPlan.Incremental (
   )
 import Internal.BuildPlan.Json (assembleFields)
 import Internal.Log (logTimed)
-import System.Environment (lookupEnv)
 import System.FilePath (splitExtension)
 import System.OsPath (OsPath)
 import Types.Args (BuildPlanField (..))
@@ -394,12 +393,13 @@ buildPlanForSources ::
   Logger ->
   Set BuildPlanField ->
   Maybe OsPath ->
+  Maybe FilePath ->
   [FilePath] ->
   m BuildPlan
-buildPlanForSources logger fields mbBuildPlan srcs = do
+buildPlanForSources logger fields mbBuildPlan actionMetadata srcs = do
   case mbBuildPlan of
     Just buildPlan | useIncrementalMetadata -> do
-      result <- liftIO $ incrementalTargets buildPlan srcs
+      result <- liftIO $ incrementalTargets buildPlan actionMetadata srcs
       case result of
         Just (changed, meta, cachedJson) -> do
           liftIO $ logger.debug ("Incremental metadata: " ++ show (length changed) ++ " changed source(s)")
@@ -409,11 +409,11 @@ buildPlanForSources logger fields mbBuildPlan srcs = do
         Nothing -> do
           liftIO $ logger.debug "No incremental state available, running full metadata"
           plan <- buildPlanFull logger fields srcs
-          liftIO $ writeIncrementalStateFromSources buildPlan plan.json
+          liftIO $ writeIncrementalStateFromSources buildPlan actionMetadata plan.json
           pure plan
     Just buildPlan -> do
       plan <- buildPlanFull logger fields srcs
-      liftIO $ writeIncrementalStateFromSources buildPlan plan.json
+      liftIO $ writeIncrementalStateFromSources buildPlan actionMetadata plan.json
       pure plan
     Nothing -> buildPlanFull logger fields srcs
   where
@@ -431,9 +431,9 @@ buildPlanFull logger fields srcs = do
   buildPlanForTargets logger fields targets
 
 -- | Write incremental state when no previous state existed (first run).
-writeIncrementalStateFromSources :: OsPath -> BuildPlanJson -> IO ()
-writeIncrementalStateFromSources buildPlan json = do
-  lookupEnv "ACTION_METADATA" >>= \case
+writeIncrementalStateFromSources :: OsPath -> Maybe FilePath -> BuildPlanJson -> IO ()
+writeIncrementalStateFromSources buildPlan actionMetadata json =
+  case actionMetadata of
     Nothing -> pure ()
     Just metaPath ->
       eitherDecodeFileStrict' metaPath >>= \case
