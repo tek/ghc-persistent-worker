@@ -85,7 +85,7 @@ useFixedNodes = True
 -- When 'False', the GHC flag parser is used.  This exists for A/B
 -- profiling comparisons.
 useFastFlagParser :: Bool
-useFastFlagParser = True
+useFastFlagParser = False
 
 -- | Add a fresh 'HomeUnitEnv' to the home unit graph using the supplied unit state and dependencies.
 insertHomeUnit ::
