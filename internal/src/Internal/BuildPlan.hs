@@ -47,6 +47,7 @@ import Internal.BuildPlan.Incremental (
   writeIncrementalState,
   )
 import Internal.BuildPlan.Json (assembleFields)
+import Internal.Log (logTimed)
 import System.Environment (lookupEnv)
 import System.FilePath (splitExtension)
 import System.OsPath (OsPath)
@@ -67,6 +68,7 @@ import Types.BuildPlan (
   summaryModuleKey,
   )
 import Types.CachedDeps (JsonFs (..))
+import Types.Log (Logger (..))
 
 #if !MIN_VERSION_GLASGOW_HASKELL(9,10,0,0)
 
@@ -367,16 +369,17 @@ oldSummaries graph = [s | ModuleNode _ s <- mgModSummaries' graph]
 
 buildPlanForTargets ::
   GhcMonad m =>
+  Logger ->
   Set BuildPlanField ->
   [Target] ->
   m BuildPlan
-buildPlanForTargets fields targets = do
+buildPlanForTargets logger fields targets = do
   GHC.setTargets targets
-  (errs, graph) <- withSession (liftIO . downsweepWithCache)
+  (errs, graph) <- logTimed logger "Downsweep" $ withSession (liftIO . downsweepWithCache)
   let msgs = unionManyMessages errs
   unless (isEmptyMessages msgs) $ throwErrors (fmap GhcDriverMessage msgs)
   hsc_env <- getSession
-  json <- liftIO $ buildPlanModules fields hsc_env graph
+  json <- logTimed logger "Build plan modules" $ liftIO $ buildPlanModules fields hsc_env graph
   pure BuildPlan {graph, json}
 
 -- | Toggle for incremental metadata.
@@ -388,40 +391,44 @@ useIncrementalMetadata = True
 
 buildPlanForSources ::
   GhcMonad m =>
+  Logger ->
   Set BuildPlanField ->
   Maybe OsPath ->
   [FilePath] ->
   m BuildPlan
-buildPlanForSources fields mbBuildPlan srcs = do
+buildPlanForSources logger fields mbBuildPlan srcs = do
   case mbBuildPlan of
     Just buildPlan | useIncrementalMetadata -> do
       result <- liftIO $ incrementalTargets buildPlan srcs
       case result of
         Just (changed, meta, cachedJson) -> do
-          plan <- buildPlanIncremental fields buildPlan changed allSources cachedJson
+          liftIO $ logger.debug ("Incremental metadata: " ++ show (length changed) ++ " changed source(s)")
+          plan <- buildPlanIncremental logger fields buildPlan changed allSources cachedJson
           liftIO $ writeIncrementalState buildPlan meta plan.json
           pure plan
         Nothing -> do
-          plan <- buildPlanFull fields srcs
+          liftIO $ logger.debug "No incremental state available, running full metadata"
+          plan <- buildPlanFull logger fields srcs
           liftIO $ writeIncrementalStateFromSources buildPlan plan.json
           pure plan
     Just buildPlan -> do
-      plan <- buildPlanFull fields srcs
+      plan <- buildPlanFull logger fields srcs
       liftIO $ writeIncrementalStateFromSources buildPlan plan.json
       pure plan
-    Nothing -> buildPlanFull fields srcs
+    Nothing -> buildPlanFull logger fields srcs
   where
     allSources = srcs
 
 -- | Full downsweep targeting all sources.
 buildPlanFull ::
   GhcMonad m =>
+  Logger ->
   Set BuildPlanField ->
   [FilePath] ->
   m BuildPlan
-buildPlanFull fields srcs = do
+buildPlanFull logger fields srcs = do
   targets <- for srcs \ src -> GHC.guessTarget src Nothing Nothing
-  buildPlanForTargets fields targets
+  buildPlanForTargets logger fields targets
 
 -- | Write incremental state when no previous state existed (first run).
 writeIncrementalStateFromSources :: OsPath -> BuildPlanJson -> IO ()
@@ -442,21 +449,24 @@ writeIncrementalStateFromSources buildPlan json = do
 -- On other GHCs, unchanged modules are loaded via 'summariseFile' as before.
 buildPlanIncremental ::
   GhcMonad m =>
+  Logger ->
   Set BuildPlanField ->
   OsPath ->
   [FilePath] ->
   [FilePath] ->
   Maybe BuildPlanJson ->
   m BuildPlan
-buildPlanIncremental fields buildPlan changed allSources cachedJson
+buildPlanIncremental logger fields buildPlan changed allSources cachedJson
   | null changed = do
     -- Nothing changed: run full build (rare edge case)
-    buildPlanFull fields allSources
+    buildPlanFull logger fields allSources
   | otherwise = do
     hsc_env0 <- getSession
-    mbCachedGraph <- liftIO $ loadCachedGraph hsc_env0 buildPlan
+    mbCachedGraph <- logTimed logger "Load cached graph" $ liftIO $ loadCachedGraph hsc_env0 buildPlan
     case mbCachedGraph of
-      Nothing -> buildPlanFull fields allSources
+      Nothing -> do
+        liftIO $ logger.debug "Cached graph unavailable, falling back to full metadata"
+        buildPlanFull logger fields allSources
       Just cachedGraph -> do
         -- Target only changed sources
         targets <- traverse (\ src -> GHC.guessTarget src Nothing Nothing) changed
@@ -464,14 +474,15 @@ buildPlanIncremental fields buildPlan changed allSources cachedJson
         -- Run downsweep without graph cache (so downsweep fully processes imported modules).
         -- On non-FIXED_NODES, old summaries enable timestamp comparison.
         -- On FIXED_NODES, old summaries are empty (fixed nodes have no ModSummary).
-        (errs, freshGraph) <- withSession \ hsc_env -> liftIO do
-          downsweepCompat hsc_env (oldSummaries cachedGraph) Nothing [] True
+        (errs, freshGraph) <- logTimed logger ("Downsweep (" ++ show (length changed) ++ " changed)") $
+          withSession \ hsc_env -> liftIO $
+            downsweepCompat hsc_env (oldSummaries cachedGraph) Nothing [] True
         let msgs = unionManyMessages errs
         unless (isEmptyMessages msgs) $ throwErrors (fmap GhcDriverMessage msgs)
         -- Merge: fresh nodes (changed modules + their transitive imports from downsweep)
         -- take precedence over cached nodes
         let graph = mergeModuleGraphs freshGraph cachedGraph
         hsc_env <- getSession
-        freshJson <- liftIO $ buildPlanModules fields hsc_env graph
+        freshJson <- logTimed logger "Build plan modules" $ liftIO $ buildPlanModules fields hsc_env graph
         let json = maybe freshJson (mergeBuildPlanJson freshJson) cachedJson
         pure BuildPlan {graph, json}

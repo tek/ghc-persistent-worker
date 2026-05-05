@@ -42,19 +42,14 @@ import GHC.Driver.Make (summariseFile)
 #if !defined(FIXED_NODES)
 import Internal.Error (eitherMessages)
 #endif
-import System.Environment (lookupEnv)
 import System.Directory (doesFileExist)
+import System.Environment (lookupEnv)
 import System.IO (hPutStrLn, stderr)
-import System.OsPath (OsPath)
 import qualified System.OsPath as OsPath
-import Types.CachedDeps (CachedModule (..), CachedPackageDep (..), CachedUnit (..), JsonFs (..))
+import System.OsPath (OsPath)
 import Types.BuildPlan (BuildPlanJson (..), BuildPlanSchema (..), PackageDeps (..))
-import Types.Incremental (
-  ActionMetadata,
-  IncrementalState (..),
-  actionMetadataSourceDigests,
-  changedSources,
-  )
+import Types.CachedDeps (CachedModule (..), CachedPackageDep (..), CachedUnit (..), JsonFs (..))
+import Types.Incremental (ActionMetadata, IncrementalState (..), actionMetadataSourceDigests, changedSources)
 
 -- | The environment variable name that Buck uses to communicate the metadata file path.
 actionMetadataEnvVar :: String
@@ -84,7 +79,7 @@ incrementalTargets ::
   OsPath ->
   [FilePath] ->
   IO (Maybe ([FilePath], ActionMetadata, Maybe BuildPlanJson))
-incrementalTargets buildPlan allSources = do
+incrementalTargets buildPlan _allSources = do
   lookupEnv actionMetadataEnvVar >>= \case
     Nothing -> pure Nothing
     Just metaPath -> do
