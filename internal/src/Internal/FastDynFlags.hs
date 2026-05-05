@@ -17,12 +17,14 @@ module Internal.FastDynFlags (
 
 import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as B8
-import FlatParse.Basic (Parser, Result (..), byteString, runParser, takeRest, eof, (<|>), byteStringOf)
+import qualified Data.Map.Strict as Map
+import FlatParse.Basic (Parser, Result (..), byteString, byteStringOf, eof, runParser, takeRest, (<|>))
 import GHC.Data.OsPath (unsafeEncodeUtf)
 import GHC.Driver.DynFlags (
   DynFlags (..),
   GeneralFlag (..),
   GhcLink (..),
+  Language (..),
   ModRenaming (..),
   PackageArg (..),
   PackageDBFlag (..),
@@ -30,9 +32,15 @@ import GHC.Driver.DynFlags (
   PkgDbRef (..),
   gopt_set,
   gopt_unset,
+  lang_set,
+  xopt_set,
+  xopt_unset,
   )
+import GHC.Driver.Session (updOptLevel)
+import qualified GHC.LanguageExtensions as LangExt
 import GHC.Platform.Ways (Way (..), addWay, wayGeneralFlags, wayUnsetGeneralFlags)
 import GHC.Unit.Types (stringToUnit, stringToUnitId)
+import GHC.Utils.CliOption (Option (..))
 
 -- | A parsed flag with its effect on 'DynFlags'.
 data Flag
@@ -56,14 +64,33 @@ parseLine =
   <|> noArgFlag "-fbyte-code-and-object-code" (gopt_set `flip` Opt_ByteCodeAndObjectCode)
   <|> noArgFlag "-fprefer-byte-code" (gopt_set `flip` Opt_UseBytecodeRatherThanObjects)
   <|> noArgFlag "-fPIC" (gopt_set `flip` Opt_PIC)
+  <|> noArgFlag "-fwrite-ide-info" (gopt_set `flip` Opt_WriteHie)
+  <|> noArgFlag "-fexternal-dynamic-refs" (gopt_set `flip` Opt_ExternalDynamicRefs)
+  <|> noArgFlag "-fpackage-db-byte-code" id
+  <|> noArgFlag "-prof" addWayProf
+  <|> noArgFlag "-haddock" (gopt_set `flip` Opt_Haddock)
   <|> noArgFlag "-i" (\d -> d {importPaths = []})
+  <|> noArgFlag "-Werror" (gopt_set `flip` Opt_WarnIsError)
+  <|> noArgFlag "-fdefer-diagnostics" (gopt_set `flip` Opt_DeferDiagnostics)
+  <|> extensionFlag
+  <|> optimizationFlag
+  <|> warningFlag
+  <|> prefixLFlag
+  <|> prefixlFlag
+  <|> eqArgFlag "-fdiagnostics-color" (\_v d -> d)
   <|> oneArgFlag "-osuf" (\v d -> d {objectSuf_ = v})
   <|> oneArgFlag "-hisuf" (\v d -> d {hiSuf_ = v})
   <|> oneArgFlag "-odir" (\v d -> d {objectDir = Just v})
   <|> oneArgFlag "-hidir" (\v d -> d {hiDir = Just v})
   <|> oneArgFlag "-stubdir" (\v d -> d {stubDir = Just v})
+  <|> oneArgFlag "-hiedir" (\_v d -> d)
+  <|> oneArgFlag "-dumpdir" (\_v d -> d)
   <|> oneArgFlag "-this-unit-id" (\v d -> d {homeUnitId_ = stringToUnitId v})
+  <|> noArgFlag "-j" id
+  <|> eqArgFlag "-package-env" (\_v d -> d)
   <|> oneArgFlag "-dep-makefile" (\_v d -> d)
+  <|> oneArgFlag "-dep-json" (\_v d -> d)
+  <|> oneArgFlag "-main-is" (\v d -> d {mainFunIs = Just v})
   <|> oneArgFlag "-tmpdir" (\_v d -> d)
   <|> oneArgFlag "-package-db" addPackageDB
   <|> oneArgFlag "-package-id" (\v d -> addExpose d ("-package-id " ++ v) (UnitIdArg (stringToUnit v)))
@@ -79,6 +106,15 @@ noArgFlag name f = FlagNoArg f <$ (byteString name *> eof)
 oneArgFlag :: ByteString -> (String -> DynFlags -> DynFlags) -> Parser () Flag
 oneArgFlag name f = FlagOneArg (\bs -> f (B8.unpack bs)) <$ (byteString name *> eof)
 {-# inline oneArgFlag #-}
+
+-- | Match a flag with an inline @=value@ argument on the same line.
+eqArgFlag :: ByteString -> (String -> DynFlags -> DynFlags) -> Parser () Flag
+eqArgFlag name f = do
+  byteString name
+  byteString "="
+  val <- byteStringOf takeRest
+  pure (FlagNoArg (f (B8.unpack val)))
+{-# inline eqArgFlag #-}
 
 -- | A non-flag line (source file) or an unrecognized flag.
 sourceOrUnknown :: Parser () Flag
@@ -133,3 +169,78 @@ addWayDyn dflags =
       dflags2 = foldl' gopt_set dflags1 (wayGeneralFlags platform WayDyn)
       dflags3 = foldl' gopt_unset dflags2 (wayUnsetGeneralFlags platform WayDyn)
   in dflags3
+-- | Add 'WayProf' to the target ways and apply associated general flag changes.
+addWayProf :: DynFlags -> DynFlags
+addWayProf dflags =
+  let platform = targetPlatform dflags
+      dflags1 = dflags {targetWays_ = addWay WayProf (targetWays_ dflags)}
+      dflags2 = foldl' gopt_set dflags1 (wayGeneralFlags platform WayProf)
+      dflags3 = foldl' gopt_unset dflags2 (wayUnsetGeneralFlags platform WayProf)
+  in dflags3
+
+-- | Map from extension name to 'LangExt.Extension', built from all
+-- constructors via 'Bounded'/'Enum'.
+extensionMap :: Map.Map ByteString LangExt.Extension
+extensionMap =
+  Map.fromList [(B8.pack (show ext), ext) | ext <- [minBound .. maxBound]]
+
+-- | Map from language name to 'Language'.
+languageMap :: Map.Map ByteString Language
+languageMap =
+  Map.fromList [(B8.pack (show lang), lang) | lang <- [minBound .. maxBound]]
+
+-- | Parse @-X@ extension and language flags.
+--
+-- Handles @-X\<Name\>@ (enable), @-XNo\<Name\>@ (disable), and language
+-- standards like @-XHaskell2010@.
+extensionFlag :: Parser () Flag
+extensionFlag = do
+  byteString "-X"
+  name <- byteStringOf takeRest
+  case Map.lookup name languageMap of
+    Just lang -> pure (FlagNoArg (\d -> lang_set d (Just lang)))
+    Nothing
+      | Just noName <- B8.stripPrefix "No" name
+      , Just ext <- Map.lookup noName extensionMap ->
+        pure (FlagNoArg (\d -> xopt_unset d ext))
+      | Just ext <- Map.lookup name extensionMap ->
+        pure (FlagNoArg (\d -> xopt_set d ext))
+      | otherwise ->
+        error ("Internal.FastDynFlags: unknown extension: " ++ B8.unpack name)
+
+-- | Parse @-O@ optimization level flags.
+--
+-- Uses 'updOptLevel' from @GHC.Driver.Session@ to set the appropriate
+-- general flags and LLVM opt level.
+optimizationFlag :: Parser () Flag
+optimizationFlag =
+  noArgFlag "-O0" (updOptLevel 0)
+  <|> noArgFlag "-O1" (updOptLevel 1)
+  <|> noArgFlag "-O2" (updOptLevel 2)
+  <|> noArgFlag "-O" (updOptLevel 1)
+
+-- | Parse warning-related flags as no-ops.
+--
+-- Warnings do not affect code generation, so these are accepted but ignored.
+-- @-Werror@ is handled separately above as it sets 'Opt_WarnIsError'.
+-- Covers @-Weverything@, @-W\<name\>@, @-Wno-\<name\>@,
+-- @-fwarn-\<name\>@, and @-fno-warn-\<name\>@.
+warningFlag :: Parser () Flag
+warningFlag =
+  prefixed "-W" <|> prefixed "-fwarn-" <|> prefixed "-fno-warn-"
+  where
+    prefixed p = FlagNoArg id <$ (byteString p *> takeRest *> eof)
+
+-- | Parse @-L\<path\>@ library search path flags.
+prefixLFlag :: Parser () Flag
+prefixLFlag = do
+  byteString "-L"
+  path <- byteStringOf takeRest
+  pure (FlagNoArg (\d -> d {libraryPaths = libraryPaths d ++ [B8.unpack path]}))
+
+-- | Parse @-l\<lib\>@ link library flags.
+prefixlFlag :: Parser () Flag
+prefixlFlag = do
+  byteString "-l"
+  lib <- byteStringOf takeRest
+  pure (FlagNoArg (\d -> d {ldInputs = ldInputs d ++ [Option ("-l" ++ B8.unpack lib)]}))
