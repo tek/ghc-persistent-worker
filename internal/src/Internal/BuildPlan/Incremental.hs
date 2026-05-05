@@ -19,7 +19,7 @@ import GHC.Unit (UnitId)
 import GHC.Unit.Home (GenHomeUnit (DefiniteHomeUnit))
 import GHC.Unit.Module (ModuleName)
 import GHC.Unit.Module.Graph (ModuleGraph, ModuleGraphNode (..), mgModSummaries', mkModuleGraph, mkNodeKey)
-import GHC.Unit.Module.ModSummary (ms_unitid)
+import GHC.Unit.Module.ModSummary (msHsFilePath, ms_unitid)
 
 #if defined(FIXED_NODES)
 import GHC.Data.OsPath (unsafeEncodeUtf)
@@ -29,6 +29,7 @@ import GHC.Types.SourceFile (HscSource (HsSrcFile))
 import GHC.Unit (GenWithIsBoot (..), IsBootInterface (..))
 import GHC.Unit.Finder (addHomeModuleToFinder, mkHomeModLocation)
 import GHC.Unit.Module.Graph (ModuleNodeInfo (..), NodeKey (..))
+import GHC.Unit.Module.Location (ml_hs_file_ospath)
 import System.FilePath (splitExtension)
 #else
 import GHC.Driver.Make (ModNodeKeyWithUid (..))
@@ -155,17 +156,27 @@ mergeList = mergeMaybe unionList
   where
     unionList a b = a ++ filter (\x -> not (elem x a)) b
 
--- | Extract a module graph containing only modules from dep units (not the active unit).
+-- | Build the graph cache for incremental downsweep.
 --
--- Used as the graph cache for incremental downsweep: dep-unit modules are pre-populated
--- in downsweep's @done@ map so they are skipped, avoiding costly recursive traversal.
--- Current-unit modules are excluded so downsweep re-processes them, discovering new
--- transitive imports of changed modules.
-depUnitModuleGraph :: HscEnv -> ModuleGraph
-depUnitModuleGraph hsc_env =
-  mkModuleGraph (filter isDepUnit (mgModSummaries' hsc_env.hsc_mod_graph))
+-- Combines dep-unit modules from 'hsc_mod_graph' with unchanged current-unit modules from
+-- the cached graph.  Excludes only the changed modules so downsweep re-processes those,
+-- discovering any new transitive imports.  Everything else is pre-populated in downsweep's
+-- @done@ map, making it near-instant for single-module changes.
+incrementalGraphCache ::
+  HscEnv ->
+  ModuleGraph ->
+  -- ^ Cached graph of the current unit (from previous build plan)
+  [String] ->
+  -- ^ Changed source paths
+  ModuleGraph
+incrementalGraphCache hsc_env cachedGraph changed =
+  mkModuleGraph (depUnitNodes ++ unchangedCurrentNodes)
   where
+    depUnitNodes = filter isDepUnit (mgModSummaries' hsc_env.hsc_mod_graph)
+    unchangedCurrentNodes = filter (not . isChanged) (mgModSummaries' cachedGraph)
+
     activeUnit = hscActiveUnitId hsc_env
+    changedSet = Set.fromList changed
 
     isDepUnit = \case
 #if defined(FIXED_NODES)
@@ -176,6 +187,18 @@ depUnitModuleGraph hsc_env =
 #endif
       InstantiationNode uid _ -> uid /= activeUnit
       LinkNode _ uid -> uid /= activeUnit
+
+    isChanged = \case
+#if defined(FIXED_NODES)
+      ModuleNode _ (ModuleNodeCompile ms) -> Set.member (msHsFilePath ms) changedSet
+      ModuleNode _ (ModuleNodeFixed _ loc) ->
+        case OsPath.decodeUtf <$> (ml_hs_file_ospath loc) of
+          Just (Right p) -> Set.member p changedSet
+          _ -> False
+#else
+      ModuleNode _ ms -> Set.member (msHsFilePath ms) changedSet
+#endif
+      _ -> False
 
 -- | Load the module graph from the previous build plan JSON file.
 --

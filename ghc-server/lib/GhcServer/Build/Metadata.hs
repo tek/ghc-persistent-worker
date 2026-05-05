@@ -6,7 +6,6 @@ import GhcServer.Cache (buildDepPlans, writeUnitCache)
 import GhcServer.Data.BuildEnv (BuildEnv (..))
 import GhcServer.Data.BuildEvent (BuildEvent (..), logEvent)
 import GhcServer.Data.Unit (Project (..), Unit (..), UnitName (..))
-import GhcServer.Log (withBuildLog)
 import GhcServer.Path (fp, osPath)
 import Internal.Metadata (computeMetadata)
 import Prelude hiding (log)
@@ -79,7 +78,7 @@ runMetadata buildEnv name = do
   logEvent buildEnv.events (MetadataRan name)
   case Map.lookup name buildEnv.project.units of
     Nothing -> pure ([(name, "Unit not found in project")], [])
-    Just unit -> withBuildLog (run unit)
+    Just unit -> run unit buildEnv.log
   where
     run unit logger = do
       cachedPlans <- buildDepPlans buildEnv.project.depGraph unit

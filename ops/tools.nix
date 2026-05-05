@@ -250,16 +250,14 @@ in {
     rm -f $project/cache/unit1/cached_unit.json
 
     echo "Starting server for incremental metadata rebuild..."
-    ${serverPkg}/bin/ghc-server --verbose $project &
+    ${serverPkg}/bin/ghc-server --verbose $project 2>$project/server_stderr.log &
     server_pid=$!
 
     echo "Running incremental metadata for unit1..."
     ${serverPkg}/bin/ghc-client $project --wait unit1:metadata
 
-    echo "Checking server log..."
-    if [[ -f $project/ghc-server.log ]]; then
-      cat $project/ghc-server.log
-    fi
+    echo "Server stderr:"
+    cat $project/server_stderr.log
 
     echo "Test completed."
     '';
