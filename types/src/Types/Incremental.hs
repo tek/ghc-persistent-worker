@@ -6,10 +6,11 @@
 -- The worker compares these with stored digests from the previous run to identify changed sources.
 module Types.Incremental where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:))
+import Data.Aeson (FromJSON (..), ToJSON (..), withObject, (.:), (.:?))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
+import Types.BuildPlan (BuildPlanJson)
 
 -- | A single input entry in Buck's action metadata file.
 data InputDigest =
@@ -35,12 +36,23 @@ data ActionMetadata =
 --
 -- This is written by the worker after each metadata step and read on the next run to determine
 -- which sources changed.
-newtype IncrementalState =
+--
+-- | Also stores the 'BuildPlanJson' from the previous run, so that unchanged modules'
+-- build plan data can be carried forward without re-parsing their source.
+data IncrementalState =
   IncrementalState {
-    sourceDigests :: Map FilePath String
+    sourceDigests :: Map FilePath String,
+    buildPlanJson :: Maybe BuildPlanJson
   }
   deriving stock (Eq, Show, Generic)
-  deriving anyclass (FromJSON, ToJSON)
+  deriving anyclass (ToJSON)
+
+-- | Backward-compatible decoder: 'buildPlanJson' defaults to 'Nothing' if absent.
+instance FromJSON IncrementalState where
+  parseJSON = withObject "IncrementalState" \ o -> do
+    sourceDigests <- o .: "sourceDigests"
+    buildPlanJson <- o .:? "buildPlanJson"
+    pure IncrementalState {sourceDigests, buildPlanJson}
 
 -- | Convert action metadata to a source digest map, filtering to Haskell source files.
 actionMetadataSourceDigests :: ActionMetadata -> Map FilePath String
