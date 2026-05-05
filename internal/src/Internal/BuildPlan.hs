@@ -40,6 +40,7 @@ import GHC.Unit.Module.ModSummary (ModSummary (..), isBootSummary, msHsFilePath,
 import GHC.Utils.Error (isEmptyMessages)
 import Internal.BuildPlan.External (packageName, unitImports)
 import Internal.BuildPlan.Incremental (
+  depUnitModuleGraph,
   incrementalTargets,
   loadCachedGraph,
   mergeBuildPlanJson,
@@ -471,12 +472,15 @@ buildPlanIncremental logger fields buildPlan changed allSources cachedJson
         -- Target only changed sources
         targets <- traverse (\ src -> GHC.guessTarget src Nothing Nothing) changed
         GHC.setTargets targets
-        -- Run downsweep without graph cache (so downsweep fully processes imported modules).
-        -- On non-FIXED_NODES, old summaries enable timestamp comparison.
-        -- On FIXED_NODES, old summaries are empty (fixed nodes have no ModSummary).
+        -- Use dep-unit modules from hsc_mod_graph as the graph cache so downsweep
+        -- skips them. Exclude current-unit modules so downsweep fully re-processes
+        -- those (including discovering new transitive imports of changed modules).
+        -- Without this, downsweep traverses ALL dep-unit modules recursively,
+        -- which is catastrophic in projects with many home units.
         (errs, freshGraph) <- logTimed logger ("Downsweep (" ++ show (length changed) ++ " changed)") $
-          withSession \ hsc_env -> liftIO $
-            downsweepCompat hsc_env (oldSummaries cachedGraph) Nothing [] True
+          withSession \ hsc_env -> liftIO $ do
+            let depUnitGraph = depUnitModuleGraph hsc_env
+            downsweepCompat hsc_env (oldSummaries cachedGraph) (Just depUnitGraph) [] True
         let msgs = unionManyMessages errs
         unless (isEmptyMessages msgs) $ throwErrors (fmap GhcDriverMessage msgs)
         -- Merge: fresh nodes (changed modules + their transitive imports from downsweep)

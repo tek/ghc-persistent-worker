@@ -19,6 +19,7 @@ import GHC.Unit (UnitId)
 import GHC.Unit.Home (GenHomeUnit (DefiniteHomeUnit))
 import GHC.Unit.Module (ModuleName)
 import GHC.Unit.Module.Graph (ModuleGraph, ModuleGraphNode (..), mgModSummaries', mkModuleGraph, mkNodeKey)
+import GHC.Unit.Module.ModSummary (ms_unitid)
 
 #if defined(FIXED_NODES)
 import GHC.Data.OsPath (unsafeEncodeUtf)
@@ -153,6 +154,28 @@ mergeList :: Eq a => Maybe [a] -> Maybe [a] -> Maybe [a]
 mergeList = mergeMaybe unionList
   where
     unionList a b = a ++ filter (\x -> not (elem x a)) b
+
+-- | Extract a module graph containing only modules from dep units (not the active unit).
+--
+-- Used as the graph cache for incremental downsweep: dep-unit modules are pre-populated
+-- in downsweep's @done@ map so they are skipped, avoiding costly recursive traversal.
+-- Current-unit modules are excluded so downsweep re-processes them, discovering new
+-- transitive imports of changed modules.
+depUnitModuleGraph :: HscEnv -> ModuleGraph
+depUnitModuleGraph hsc_env =
+  mkModuleGraph (filter isDepUnit (mgModSummaries' hsc_env.hsc_mod_graph))
+  where
+    activeUnit = hscActiveUnitId hsc_env
+
+    isDepUnit = \case
+#if defined(FIXED_NODES)
+      ModuleNode _ (ModuleNodeFixed (ModNodeKeyWithUid _ uid) _) -> uid /= activeUnit
+      ModuleNode _ (ModuleNodeCompile ms) -> ms_unitid ms /= activeUnit
+#else
+      ModuleNode _ ms -> ms_unitid ms /= activeUnit
+#endif
+      InstantiationNode uid _ -> uid /= activeUnit
+      LinkNode _ uid -> uid /= activeUnit
 
 -- | Load the module graph from the previous build plan JSON file.
 --

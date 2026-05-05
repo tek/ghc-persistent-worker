@@ -200,6 +200,70 @@ in {
     echo "SUCCESS: Incremental metadata test passed."
     '';
 
+    outputs.apps.test-incremental-wide = util.zapp "test-incremental-wide" ''
+    depth=''${1-3}
+    mods_per_unit=''${2-5}
+    project=$(mktemp -d --tmpdir ghc-server-incr-wide.XXXXXXXX)
+    echo "Creating wide project: depth=$depth, mods=$mods_per_unit at $project"
+
+    export resource_test_ext_deps=${fixedExtDeps}
+    ${serverPkg}/bin/gen-project --wide $project $depth $mods_per_unit
+
+    # Compute ACTION_METADATA JSON from unit1 sources
+    metadata_file=$project/action_metadata.json
+    compute_metadata() {
+      local meta="{\"version\": 1, \"digests\": ["
+      local first=true
+      for f in $project/unit1/*.hs; do
+        local digest=$(sha1sum $f | cut -d" " -f1)
+        if $first; then first=false; else meta="$meta, "; fi
+        meta="$meta{\"path\": \"$f\", \"digest\": \"$digest:$(stat -c%s $f)\"}"
+      done
+      meta="$meta]}"
+      echo $meta > $metadata_file
+    }
+
+    compute_metadata
+
+    ${cleanup}
+
+    echo "Starting ghc-server with ACTION_METADATA for initial build..."
+    export ACTION_METADATA=$metadata_file
+    ${serverPkg}/bin/ghc-server --verbose $project &
+    server_pid=$!
+
+    echo "Full initial build..."
+    ${serverPkg}/bin/ghc-client $project --wait
+
+    echo "Stopping server..."
+    kill $server_pid
+    wait $server_pid || true
+    server_pid=
+
+    echo "Modifying unit1/U1M0.hs..."
+    echo "-- modified" >> $project/unit1/U1M0.hs
+    compute_metadata
+
+    # Keep build-plan.json and incremental state, delete everything else for unit1
+    rm -rf $project/socket
+    find $project/output/unit1 \( -name '*.dyn_o' -o -name '*.dyn_hi' \) -delete
+    rm -f $project/cache/unit1/cached_unit.json
+
+    echo "Starting server for incremental metadata rebuild..."
+    ${serverPkg}/bin/ghc-server --verbose $project &
+    server_pid=$!
+
+    echo "Running incremental metadata for unit1..."
+    ${serverPkg}/bin/ghc-client $project --wait unit1:metadata
+
+    echo "Checking server log..."
+    if [[ -f $project/ghc-server.log ]]; then
+      cat $project/ghc-server.log
+    fi
+
+    echo "Test completed."
+    '';
+
     outputs.apps.test-server = util.zapp "test-server" ''
     ${setupProject}
 

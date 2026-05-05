@@ -10,6 +10,7 @@ import GhcServer.Log (withBuildLog)
 import GhcServer.Path (fp, osPath)
 import Internal.Metadata (computeMetadata)
 import Prelude hiding (log)
+import System.Environment (lookupEnv)
 import System.OsPath (OsPath, (</>))
 import Types.Args (Args (..))
 import Types.CachedDeps (CachedBuildPlans)
@@ -36,9 +37,10 @@ staticMetaArgs =
   ]
 
 -- | Construct the GHC CLI arguments for a metadata step.
-metadataArgs :: Args -> OsPath -> Maybe CachedBuildPlans -> Unit -> Args
-metadataArgs base outputDir cachedPlans unit =
+metadataArgs :: Args -> OsPath -> Maybe CachedBuildPlans -> Maybe FilePath -> Unit -> Args
+metadataArgs base outputDir cachedPlans actionMeta unit =
   base {
+    actionMetadata = actionMeta,
     buildPlan = Just buildPlanPath,
     cachedBuildPlans = cachedPlans,
     ghcOptions =
@@ -81,10 +83,11 @@ runMetadata buildEnv name = do
   where
     run unit logger = do
       cachedPlans <- buildDepPlans buildEnv.project.depGraph unit
+      actionMeta <- lookupEnv "ACTION_METADATA"
       let env = Env {
             log = logger,
             state = buildEnv.stateVar,
-            args = metadataArgs buildEnv.baseArgs buildEnv.outputDir (Just cachedPlans) unit
+            args = metadataArgs buildEnv.baseArgs buildEnv.outputDir (Just cachedPlans) actionMeta unit
           }
       ifM (fst <$> computeMetadata env) (success unit (Just cachedPlans) env.args logger) (failure logger)
 
