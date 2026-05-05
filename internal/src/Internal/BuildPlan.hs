@@ -334,6 +334,13 @@ buildPlanForTargets fields targets = do
   json <- liftIO $ buildPlanModules fields hsc_env graph
   pure BuildPlan {graph, json}
 
+-- | Toggle for incremental metadata.
+-- When 'True', 'buildPlanForSources' uses the incremental path when a previous state file exists.
+-- When 'False', always runs full downsweep.
+-- Flip for A/B profiling comparisons.
+useIncrementalMetadata :: Bool
+useIncrementalMetadata = True
+
 buildPlanForSources ::
   GhcMonad m =>
   Set BuildPlanField ->
@@ -342,7 +349,7 @@ buildPlanForSources ::
   m BuildPlan
 buildPlanForSources fields mbBuildPlan srcs = do
   case mbBuildPlan of
-    Just buildPlan -> do
+    Just buildPlan | useIncrementalMetadata -> do
       result <- liftIO $ incrementalTargets buildPlan srcs
       case result of
         Just (changed, meta) -> do
@@ -353,6 +360,10 @@ buildPlanForSources fields mbBuildPlan srcs = do
           plan <- buildPlanFull fields srcs
           liftIO $ writeIncrementalStateFromSources buildPlan srcs
           pure plan
+    Just buildPlan -> do
+      plan <- buildPlanFull fields srcs
+      liftIO $ writeIncrementalStateFromSources buildPlan srcs
+      pure plan
     Nothing -> buildPlanFull fields srcs
 
 -- | Full downsweep targeting all sources.

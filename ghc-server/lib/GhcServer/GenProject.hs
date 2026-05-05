@@ -306,7 +306,63 @@ wideModuleSource uid mid modsPerUnit extDeps childUids =
           intercalate " + " allValues ++ " + 1"
       | otherwise = show (uid * modsPerUnit + mid)
 
--- | Write a wide-mode project to disk.
+-- | Write a flat single-unit project to disk.
+--
+-- Generates one unit (@unit1@) with @numModules@ modules.
+-- Module 0 imports all other modules; other modules are leaf modules with no imports.
+-- Designed for profiling incremental metadata: modifying module 0 triggers a metadata rerun
+-- where all other modules can be served from cache.
+writeFlatProject :: FilePath -> Int -> Maybe ExtDepsConfig -> IO ()
+writeFlatProject root numModules extDeps = do
+  let uName = "unit1"
+      dir = root ++ "/" ++ uName
+      args = maybe [] extDepArgs extDeps
+      config = UnitConfig {deps = [], args}
+  createDirectoryIfMissing True dir
+  LBS.writeFile (dir ++ "/unit.json") (encode config)
+  traverse_ (writeFlatModule dir numModules extDeps) ([0 .. numModules - 1] :: [Int])
+
+-- | Write a single module for flat mode.
+writeFlatModule :: FilePath -> Int -> Maybe ExtDepsConfig -> Int -> IO ()
+writeFlatModule dir numModules extDeps mid = do
+  let mName = flatModuleName mid
+      path = dir ++ "/" ++ mName ++ ".hs"
+      imports
+        | mid == 0 = map flatModuleName [1 .. numModules - 1]
+        | otherwise = []
+      extImports = maybe [] (map extDepModuleName . (.extDepIndexes)) extDeps
+      extValues = maybe [] (\cfg -> [extDepModuleName i ++ "." ++ extDepValueName i | i <- cfg.extDepIndexes]) extDeps
+      allImports = imports ++ extImports
+      importLines = map ("import qualified " ++) allImports
+      body
+        | mid == 0, not (null allImports) =
+          let homeRefs = map (\m -> m ++ ".value") imports
+              allRefs = homeRefs ++ extValues
+              -- Group refs into chunks of 50 to avoid excessively long lines
+              chunks = chunksOf 50 allRefs
+              chunkBindings = zipWith chunkBinding [(0 :: Int) ..] chunks
+              chunkBinding i cs = "chunk" ++ show i ++ " :: Int\nchunk" ++ show i ++ " = " ++ intercalate " + " cs
+              chunkRefs = ["chunk" ++ show i | i <- [0 .. length chunks - 1]]
+              topBinding = "m0_value :: Int\nm0_value = " ++ intercalate " + " chunkRefs
+          in unlines (chunkBindings ++ [topBinding])
+        | otherwise =
+          "value :: Int\nvalue = " ++ show mid
+  writeFile path $ unlines $
+    ["module " ++ mName ++ " where", ""] ++
+    importLines ++
+    ["", body, ""]
+
+-- | Module name for flat mode.
+flatModuleName :: Int -> String
+flatModuleName i = "M" ++ show i
+
+-- | Split a list into chunks of at most @n@ elements.
+chunksOf :: Int -> [a] -> [[a]]
+chunksOf _ [] = []
+chunksOf n xs =
+  let (chunk, rest) = splitAt n xs
+  in chunk : chunksOf n rest
+
 writeWideProject :: FilePath -> Int -> Int -> Maybe ExtDepsConfig -> IO ()
 writeWideProject root depth modsPerUnit extDeps = do
   let total = wideUnitCount depth

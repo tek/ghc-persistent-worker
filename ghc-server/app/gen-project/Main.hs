@@ -1,6 +1,6 @@
 module Main where
 
-import GhcServer.GenProject (ExtDepsConfig (..), writeProject, writeWideProject, wideUnitCount)
+import GhcServer.GenProject (ExtDepsConfig (..), writeProject, writeWideProject, writeFlatProject, wideUnitCount)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (getArgs, lookupEnv)
 
@@ -42,12 +42,22 @@ main = do
           putStrLn ("  modules/unit:   " ++ show modsPerUnit)
           putStrLn ("  total modules:  " ++ show (units * modsPerUnit))
           putStrLn ("  ext deps: " ++ maybe "none" (\c -> show (length c.extDepIndexes)) extDeps)
+    ["--flat", dir, numModsStr]
+      | [(numModules, "")] <- reads numModsStr, numModules > 0 -> do
+          createDirectoryIfMissing True dir
+          writeFlatProject dir numModules extDeps
+          putStrLn ("Generated flat project in " ++ dir)
+          putStrLn ("  units:          1")
+          putStrLn ("  total modules:  " ++ show numModules)
+          putStrLn ("  ext deps: " ++ maybe "none" (\c -> show (length c.extDepIndexes)) extDeps)
     _ -> do
       putStrLn "Usage: gen-project <directory> <depth>"
       putStrLn "       gen-project --wide <directory> <depth> <modules-per-unit>"
+      putStrLn "       gen-project --flat <directory> <num-modules>"
       putStrLn ""
       putStrLn "  Deep mode (default): binary tree of modules, 2*depth units"
       putStrLn "  Wide mode (--wide):  binary tree of units, 2^depth-1 units"
+      putStrLn "  Flat mode (--flat):   single unit, module 0 imports all others"
       putStrLn ""
       putStrLn "  Set resource_test_ext_deps to add external dependency packages."
       putStrLn ""
@@ -56,3 +66,6 @@ main = do
       putStrLn ""
       putStrLn "Example: gen-project --wide /tmp/test-project 10 3"
       putStrLn "  Creates a project with 1023 units, 3 modules each"
+      putStrLn ""
+      putStrLn "Example: gen-project --flat /tmp/test-project 1000"
+      putStrLn "  Creates a project with 1 unit, 1000 modules (M0 imports M1..M999)"
