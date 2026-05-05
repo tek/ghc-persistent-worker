@@ -29,7 +29,7 @@ import GHC.Utils.Outputable (comma, hcat, ppr, punctuate, quotes, text, (<+>))
 import Internal.Compat.GHC914 (moduleNodeEdge)
 import Internal.DynFlags (buckLocation, parseFlags, setupPath)
 import Internal.DynFlags.Parse (parseDynFlags)
-import Internal.Log (logTimed, logTimedD)
+import Internal.Log (logDebugD, logTimed, logTimedD)
 import Internal.State (updateMakeState)
 import qualified Internal.State.Make as Make
 import Internal.State.Make (insertUnitEnv, storeModuleGraph)
@@ -273,9 +273,29 @@ loadCachedUnits logger stateVar dflags0 (CachedBuildPlans buildPlans) features h
             then pure (plan, Nothing)
             else do
               cachedUnit@CachedUnit {unit_args} <- liftIO $ decodeJsonBuildPlan planFile
-              mdflags1 <- traverse (readParseGHCArgs features.flagParser hsc_env1 dflags0) unit_args
-              pure (plan, (cachedUnit,) <$> mdflags1)
-      runStateT (foldM ensureBuildPlan hsc_env1 buildPlans_with_cunit_and_dflags) state
+              case unit_args of
+                Nothing -> pure Nothing
+                Just argsFile -> do
+                  dflags <- readParseGHCArgs features.flagParser hsc_env1 dflags0 argsFile
+#if defined(UNIT_INDEX)
+                  (dbs, unitState, homeUnit, mconstants) <-
+                    initUnits hsc_env1.hsc_logger dflags hsc_env1.hsc_unit_env.ue_index Nothing allUnitIds
+#else
+                  (dbs, unitState, homeUnit, mconstants) <-
+                    initUnits hsc_env1.hsc_logger dflags Nothing allUnitIds
+#endif
+                  dflags' <- updatePlatformConstants dflags mconstants
+                  let moduleEntries = Map.toList (fold (cachedUnit.cache <|> cachedUnit.build_plan))
+                  pure $ Just PreparedUnit {
+                    unitId = uid,
+                    dflags = dflags',
+                    dbs,
+                    unitState,
+                    homeUnit,
+                    moduleEntries,
+                    buckArgs = cachedUnit.unit_buck_args
+                  }
+      runStateT (foldM insertPreparedUnit hsc_env1 prepared) state
   where
     ensureBuildPlan hsc_env (CachedBuildPlan {name = JsonFs uid}, mb_cachedUnit_dflags) = do
       present <- gets \ s -> isJust (unitEnv_lookup_maybe uid s.make.hug)
@@ -286,3 +306,15 @@ loadCachedUnits logger stateVar dflags0 (CachedBuildPlans buildPlans) features h
           Nothing -> pure hsc_env -- don't we yield error here?
           Just (cachedUnit, dflags) -> do
             loadCachedUnit logger features.fixedNodesCache hsc_env uid (cachedUnit, dflags)
+
+    insertPreparedUnit hsc_env (Just pu) = do
+      logDebugD logger (text "Loading cached unit" <+> quotes (ppr pu.unitId))
+      traverse_ loadCachedArgs pu.buckArgs
+      hsc_env2 <- liftIO do
+        unit_env <- insertHomeUnit pu.unitId pu.dflags pu.dbs pu.unitState pu.homeUnit hsc_env.hsc_unit_env
+        let hsc_env1 = hsc_env {hsc_unit_env = unit_env}
+        pure (hscSetActiveUnitId pu.unitId hsc_env1)
+      modify (updateMakeState (insertUnitEnv hsc_env2))
+      nodes <- liftIO $ traverse (uncurry (loadCachedModule features.fixedNodesCache hsc_env2 pu.unitId)) pu.moduleEntries
+      modify (updateMakeState (storeModuleGraph (mkModuleGraph nodes)))
+      pure hsc_env2

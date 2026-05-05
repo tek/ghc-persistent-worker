@@ -40,6 +40,7 @@ import System.OsPath (OsPath, unsafeEncodeUtf)
 import Types.Args (Args (..), BuildPlanField, buildPlanAll)
 import Types.BuildPlan (BuildPlan (..))
 import Types.Env (Env (..))
+import Types.FeatureFlags (FeatureFlags (..))
 import Types.Log (Logger (..))
 import Types.State (WorkerState (..))
 import Types.Target (TargetSpec (..), UnitTarget (..))
@@ -120,17 +121,20 @@ resolveDepJson hsc_env path =
 -- We need to use a temporary session because 'doMkDependHS' uses some custom settings that we don't want to leak,
 -- though it's not been thoroughly tested what precisely the impact is.
 writeMetadata ::
+  Bool ->
+  Logger ->
   Maybe OsPath ->
+  Maybe FilePath ->
   Maybe (NonEmpty BuildPlanField) ->
   [String] ->
   Ghc ModuleGraph
-writeMetadata path fieldSelection srcs = do
+writeMetadata useIncremental logger path actionMetadata fieldSelection srcs = do
   initializeSessionPlugins
   withTempSession metadataTempSession do
     hsc_env <- getSession
     writeLegacyMakefile hsc_env
     depJson <- resolveDepJson hsc_env path
-    plan <- buildPlanForSources fields srcs
+    plan <- buildPlanForSources useIncremental logger fields path actionMetadata srcs
     liftIO $ writeBuildPlan depJson plan
     pure plan.graph
   where
@@ -158,9 +162,11 @@ computeMetadata env = do
     logTimed env.log "Computing module graph" do
       MaybeT $ runSession env $ withDynFlags env \ dflags srcs -> do
         unit <- prepareMetadataSession env dflags
-        let target = TargetUnit (UnitTarget unit)
+        let
+          target = TargetUnit (UnitTarget unit)
+          ff = env.args.featureFlags
         liftIO $ env.log.setTarget target
-        module_graph <- writeMetadata env.args.buildPlan env.args.fields (fst <$> srcs)
+        module_graph <- writeMetadata ff.incrementalMetadata env.log env.args.buildPlan env.args.actionMetadata env.args.fields (fst <$> srcs)
         liftIO do
           unless env.args.isBinary $
             updateMakeStateVar env.state (storeModuleGraph module_graph)
@@ -176,4 +182,6 @@ computeMetadata env = do
 proxyMetadata :: Env -> IO Bool
 proxyMetadata env =
   fmap isJust $ runSession env $ withGhcInSession env \ srcs ->
-    Just () <$ writeMetadata env.args.buildPlan env.args.fields (fst <$> srcs)
+    Just () <$ writeMetadata ff.incrementalMetadata env.log env.args.buildPlan env.args.actionMetadata env.args.fields (fst <$> srcs)
+  where
+    ff = env.args.featureFlags

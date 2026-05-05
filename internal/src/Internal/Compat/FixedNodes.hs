@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, PatternSynonyms, ViewPatterns #-}
+{-# LANGUAGE CPP, PatternSynonyms, ViewPatterns, FieldSelectors #-}
 
 module Internal.Compat.FixedNodes where
 

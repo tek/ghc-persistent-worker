@@ -100,7 +100,8 @@ data Args =
     cachedDeps :: Maybe CachedDeps,
     homeUnit :: Maybe FilePath,
     isBinary :: Bool,
-    featureFlags :: FeatureFlags
+    featureFlags :: FeatureFlags,
+    actionMetadata :: Maybe FilePath
   }
   deriving stock (Eq, Show)
 
@@ -120,5 +121,6 @@ emptyArgs env =
     cachedDeps = Nothing,
     homeUnit = Nothing,
     isBinary = False,
-    featureFlags = defaultFeatureFlags
+    featureFlags = defaultFeatureFlags,
+    actionMetadata = Nothing
   }

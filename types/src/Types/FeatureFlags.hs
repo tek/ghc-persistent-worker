@@ -4,6 +4,8 @@ data FeatureFlag =
   FeatureFixedNodesCache
   |
   FeatureFlagParser
+  |
+  FeatureIncrementalMetadata
   deriving stock (Eq, Show)
 
 -- | Runtime feature flags that control alternative implementations.
@@ -12,7 +14,9 @@ data FeatureFlags =
     -- | Use fixed module graph nodes instead of calling 'summariseFile' when restoring from cache.
     fixedNodesCache :: Bool,
     -- | Use the custom flatparse-based flag parser instead of GHC's 'parseDynamicFlags'.
-    flagParser :: Bool
+    flagParser :: Bool,
+    -- | Use incremental metadata (only re-downsweep changed modules).
+    incrementalMetadata :: Bool
   }
   deriving stock (Eq, Show)
 

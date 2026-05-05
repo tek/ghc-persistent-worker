@@ -3,6 +3,7 @@
 module Internal.BuildPlan where
 
 import Control.Monad (unless)
+import Data.Aeson (eitherDecodeFileStrict')
 import Data.Either (partitionEithers)
 import Data.Foldable (toList)
 import Data.List.NonEmpty (NonEmpty (..), groupAllWith)
@@ -41,11 +42,22 @@ import GHC.Unit.Module.Graph (
 import GHC.Unit.Module.ModSummary (ModSummary (..), isBootSummary, msHsFilePath, ms_mod_name, ms_unitid)
 import GHC.Utils.Error (isEmptyMessages)
 import Internal.BuildPlan.External (packageName, unitImports)
+import Internal.BuildPlan.Incremental (
+  incrementalGraphCache,
+  incrementalTargets,
+  loadCachedGraph,
+  mergeBuildPlanJson,
+  mergeModuleGraphs,
+  writeIncrementalState,
+  )
 import Internal.BuildPlan.Json (assembleFields)
-import Internal.Compat.FixedNodes (pattern CompileNode, pattern FixedNode, deps, downsweepCompat, key, summary)
+import qualified Internal.Compat.FixedNodes as FixedNodes
+import Internal.Compat.FixedNodes (pattern CompileNode, pattern FixedNode, downsweepCompat)
 import Internal.Compat.GHC914 (edgeTarget)
 import Internal.Error (eitherMessages)
+import Internal.Log (logTimed)
 import System.FilePath (splitExtension)
+import System.OsPath (OsPath)
 import Types.Args (BuildPlanField (..))
 import Types.BuildPlan (
   BuildPlan (..),
@@ -62,6 +74,7 @@ import Types.BuildPlan (
   summaryModuleKey,
   )
 import Types.CachedDeps (JsonFs (..))
+import Types.Log (Logger (..))
 
 #if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
 
@@ -70,6 +83,13 @@ import GHC.Unit.Module.ModSummary (isTemplateHaskellOrQQNonBoot)
 #else
 
 import GHC.Unit.Module.Graph (isTemplateHaskellOrQQNonBoot)
+
+#endif
+
+#if defined(FIXED_NODES)
+
+import GHC.Unit.Module.Graph (ModuleNodeInfo (..))
+import Types.BuildPlan (moduleKeyBoot)
 
 #endif
 
@@ -222,6 +242,32 @@ packageIndex :: [(ModNodeKeyWithUid, Maybe ModSummary)] -> Map NodeKey Dep
 packageIndex =
   indexWith \ (ModNodeKeyWithUid (GWIB {gwib_mod = name}) unit) _ -> Dep {name, unit}
 
+#if defined(FIXED_NODES)
+
+-- | Extract home-unit module entries from 'ModuleNodeFixed' graph nodes.
+--
+-- During incremental metadata, unchanged modules appear as 'ModuleNodeFixed' in the merged graph.
+-- This function provides their entries for 'homeModules' so that changed modules can resolve
+-- intra-unit dependencies to them.
+fixedNodeHomeModules ::
+  HscEnv ->
+  [ModuleGraphNode] ->
+  Map NodeKey (Either (ModuleKey, JsonFs ModuleName) (ModuleKey, JsonFs ModuleName))
+fixedNodeHomeModules hsc_env =
+  Map.fromList . mapMaybe fixedHome
+  where
+    fixedHome = \case
+      ModuleNode _ (ModuleNodeFixed (ModNodeKeyWithUid mnwib uid) _)
+        | uid == hscActiveUnitId hsc_env
+        -> let name = gwib_mod mnwib
+               mk = if gwib_isBoot mnwib == IsBoot then moduleKeyBoot name else moduleKey name
+               entry = (mk, JsonFs name)
+               nk = NodeKey_Module (ModNodeKeyWithUid mnwib uid)
+           in Just (nk, if gwib_isBoot mnwib == IsBoot then Right entry else Left entry)
+      _ -> Nothing
+
+#endif
+
 -- | Precompute lookup indexes and module metadata for the build plan.
 --
 -- JSON data structures for a module graph with thousands of modules and tens of thousands of dependencies can cause
@@ -248,7 +294,11 @@ buildPlanEnv hsc_env graph =
     env = BuildPlanEnv {
       unitNames,
       homeUnitIds,
+#if defined(FIXED_NODES)
+      homeModules = localIndex (fst <$> local) <> fixedNodeHomeModules hsc_env (mgModSummaries' graph),
+#else
       homeModules = localIndex (fst <$> local),
+#endif
       packageModules = packageIndex (fst <$> packages),
       ..
     }
@@ -270,7 +320,7 @@ buildPlanEnv hsc_env graph =
 -- all modules in the active home unit.
 -- Look up all imports of modules that aren't present in the graph in the external package databases.
 buildPlanModules ::
-  (GhcMonad m) =>
+  GhcMonad m =>
   Set BuildPlanField ->
   HscEnv ->
   ModuleGraph ->
@@ -300,6 +350,18 @@ downsweepWithCache hsc_env = downsweepCompat hsc_env [] Nothing [] True
 
 #endif
 
+-- | Extract old summaries from a cached graph for downsweep timestamp comparison.
+-- On FIXED_NODES, cached graphs contain fixed nodes without 'ModSummary', so this returns @[]@.
+-- On other GHCs, cached graphs contain compile nodes with 'ModSummary'.
+oldSummaries :: ModuleGraph -> [ModSummary]
+#if defined(FIXED_NODES)
+oldSummaries _ = []
+#elif defined(DOWNSWEEP_CACHE)
+oldSummaries = mgModSummaries
+#else
+oldSummaries graph = [s | ModuleNode _ s <- mgModSummaries' graph]
+#endif
+
 -- | Disabling the backend, in conjunction with setting `ghcMode = MkDepend`, prevents
 --   downsweep from performing TH dependency analysis, which is the external build tool's
 --   responsibility.
@@ -310,23 +372,120 @@ useNoBackend hsc_env =
 
 buildPlanForTargets ::
   GhcMonad m =>
+  Logger ->
   Set BuildPlanField ->
   [Target] ->
   m BuildPlan
-buildPlanForTargets fields targets = do
+buildPlanForTargets logger fields targets = do
   GHC.setTargets targets
-  (errs, graph) <- withSession (liftIO . downsweepWithCache . useNoBackend)
+  (errs, graph) <- logTimed logger "Downsweep" $ withSession (liftIO . downsweepWithCache . useNoBackend)
   let msgs = unionManyMessages errs
   unless (isEmptyMessages msgs) $ throwErrors (fmap GhcDriverMessage msgs)
   hsc_env <- getSession
-  json <- buildPlanModules fields hsc_env graph
+  json <- logTimed logger "Build plan modules" $ buildPlanModules fields hsc_env graph
   pure BuildPlan {graph, json}
 
+-- | Toggle for incremental metadata.
+-- When 'True', 'buildPlanForSources' uses the incremental path when a previous state file exists.
+-- When 'False', always runs full downsweep.
+-- Flip for A/B profiling comparisons.
 buildPlanForSources ::
   GhcMonad m =>
+  Bool ->
+  Logger ->
+  Set BuildPlanField ->
+  Maybe OsPath ->
+  Maybe FilePath ->
+  [FilePath] ->
+  m BuildPlan
+buildPlanForSources useIncrementalMetadata logger fields mbBuildPlan actionMetadata srcs = do
+  case mbBuildPlan of
+    Just buildPlan | useIncrementalMetadata -> do
+      result <- liftIO $ incrementalTargets buildPlan actionMetadata srcs
+      case result of
+        Just (changed, meta, cachedJson) -> do
+          liftIO $ logger.debug ("Incremental metadata: " ++ show (length changed) ++ " changed source(s)")
+          plan <- buildPlanIncremental logger fields buildPlan changed allSources cachedJson
+          liftIO $ writeIncrementalState buildPlan meta plan.json
+          pure plan
+        Nothing -> do
+          liftIO $ logger.debug "No incremental state available, running full metadata"
+          plan <- buildPlanFull logger fields srcs
+          liftIO $ writeIncrementalStateFromSources buildPlan actionMetadata plan.json
+          pure plan
+    Just buildPlan -> do
+      plan <- buildPlanFull logger fields srcs
+      liftIO $ writeIncrementalStateFromSources buildPlan actionMetadata plan.json
+      pure plan
+    Nothing -> buildPlanFull logger fields srcs
+  where
+    allSources = srcs
+
+-- | Full downsweep targeting all sources.
+buildPlanFull ::
+  GhcMonad m =>
+  Logger ->
   Set BuildPlanField ->
   [FilePath] ->
   m BuildPlan
-buildPlanForSources fields srcs = do
+buildPlanFull logger fields srcs = do
   targets <- for srcs \ src -> GHC.guessTarget src Nothing Nothing
-  buildPlanForTargets fields targets
+  buildPlanForTargets logger fields targets
+
+-- | Write incremental state when no previous state existed (first run).
+writeIncrementalStateFromSources :: OsPath -> Maybe FilePath -> BuildPlanJson -> IO ()
+writeIncrementalStateFromSources buildPlan actionMetadata json =
+  case actionMetadata of
+    Nothing -> pure ()
+    Just metaPath ->
+      eitherDecodeFileStrict' metaPath >>= \case
+        Left _ -> pure ()
+        Right meta -> writeIncrementalState buildPlan meta json
+
+-- | Incremental build plan: pre-load cached graph, downsweep only changed sources, merge.
+--
+-- On FIXED_NODES GHC, unchanged modules are loaded as 'ModuleNodeFixed' (no source parsing).
+-- The build plan for changed modules is computed normally, then merged with the cached
+-- 'BuildPlanJson' from the previous run.
+--
+-- On other GHCs, unchanged modules are loaded via 'summariseFile' as before.
+buildPlanIncremental ::
+  GhcMonad m =>
+  Logger ->
+  Set BuildPlanField ->
+  OsPath ->
+  [FilePath] ->
+  [FilePath] ->
+  Maybe BuildPlanJson ->
+  m BuildPlan
+buildPlanIncremental logger fields buildPlan changed allSources cachedJson
+  | null changed = do
+    -- Nothing changed: run full build (rare edge case)
+    buildPlanFull logger fields allSources
+  | otherwise = do
+    hsc_env0 <- getSession
+    mbCachedGraph <- logTimed logger "Load cached graph" $ liftIO $ loadCachedGraph hsc_env0 buildPlan
+    case mbCachedGraph of
+      Nothing -> do
+        liftIO $ logger.debug "Cached graph unavailable, falling back to full metadata"
+        buildPlanFull logger fields allSources
+      Just cachedGraph -> do
+        -- Target only changed sources
+        targets <- traverse (\ src -> GHC.guessTarget src Nothing Nothing) changed
+        GHC.setTargets targets
+        -- Build a graph cache containing dep-unit modules AND unchanged current-unit
+        -- modules. Only changed modules are excluded, so downsweep only re-processes
+        -- those. This makes downsweep near-instant for single-module changes.
+        (errs, freshGraph) <- logTimed logger ("Downsweep (" ++ show (length changed) ++ " changed)") $
+          withSession \ hsc_env -> liftIO $ do
+            let cache = incrementalGraphCache hsc_env cachedGraph changed
+            downsweepCompat hsc_env (oldSummaries cachedGraph) (Just cache) [] True
+        let msgs = unionManyMessages errs
+        unless (isEmptyMessages msgs) $ throwErrors (fmap GhcDriverMessage msgs)
+        -- Merge: fresh nodes (changed modules + their transitive imports from downsweep)
+        -- take precedence over cached nodes
+        let graph = mergeModuleGraphs freshGraph cachedGraph
+        hsc_env <- getSession
+        freshJson <- logTimed logger "Build plan modules" $ buildPlanModules fields hsc_env graph
+        let json = maybe freshJson (mergeBuildPlanJson freshJson) cachedJson
+        pure BuildPlan {graph, json}

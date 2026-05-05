@@ -7,7 +7,7 @@ import Internal.Log (dbg, newLogger)
 import Internal.Metadata (proxyMetadata)
 import Internal.State (newState)
 import Prelude hiding (log)
-import System.Environment (getArgs)
+import System.Environment (getArgs, lookupEnv)
 import System.Exit (exitFailure)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
 import Types.Args (Args (..))
@@ -20,9 +20,11 @@ envFromArgs :: [String] -> IO (Env, MVar Log)
 envFromArgs argv = do
   buckArgs <- either parseError pure (parseBuckArgs (CommandEnv []) (RequestArgs argv))
   args <- toGhcArgs buckArgs Nothing
+  actionMetadata <- lookupEnv "ACTION_METADATA"
+  let args' = args {actionMetadata}
   state <- newState False
-  log <- newLog (TraceId . show <$> args.unit)
-  pure (Env {log = newLogger log, state, args}, log)
+  log <- newLog (TraceId . show <$> args'.unit)
+  pure (Env {log = newLogger log, state, args = args'}, log)
   where
     parseError msg =
       error ("ghc-proxy: Parsing Buck args failed: " ++ msg)

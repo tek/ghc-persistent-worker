@@ -3,6 +3,7 @@
 module Main where
  
 import BuildPlanTest (test_buildPlan)
+import IncrementalMetadataTest (test_incremental)
 import ProjectBuildTest (test_projectBuild)
 import ResourceTest (test_resources)
 import ScheduleTest (test_sortScheduleOrder)
@@ -35,7 +36,8 @@ testsGeneral :: [TestTree]
 testsGeneral =
   [
     test_sortScheduleOrder,
-    test_projectBuild
+    test_projectBuild,
+    test_incremental
   ] <> if fullTest then [
     test_buildPlan
   ] else []

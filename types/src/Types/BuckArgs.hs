@@ -262,7 +262,8 @@ toGhcArgs args featureFlags = do
     cachedDeps,
     homeUnit = args.homeUnit,
     isBinary = args.isBinary,
-    featureFlags = fromMaybe defaultFeatureFlags featureFlags
+    featureFlags = fromMaybe defaultFeatureFlags featureFlags,
+    actionMetadata = args.env !? "ACTION_METADATA"
   }
   where
     packageDbArg path = ["-package-db", path]

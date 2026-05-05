@@ -1,7 +1,7 @@
 -- | Description: Logic interfacing with the worker to start metadata and compile tasks.
 module Test.Build where
 
-import Data.Foldable (fold)
+import Data.Foldable (fold, for_)
 import Data.IORef (readIORef)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust, mapMaybe)
@@ -17,7 +17,9 @@ import Internal.Metadata (computeMetadata)
 import Internal.Session (withGhcMakeModule)
 import Numeric.Natural (Natural)
 import Prelude hiding (log)
-import System.Directory.OsPath (createDirectoryIfMissing)
+import System.Directory (createDirectoryIfMissing)
+import qualified System.Directory.OsPath as OsDir
+import System.FilePath (takeDirectory)
 import System.OsPath (OsPath, osp, (</>))
 import Test.Data.BuildSystem (BuildResult (..))
 import Test.Data.Env (MaxJobs, SessionEnv (..), TestEnv (..))
@@ -36,7 +38,7 @@ import Test.Data.Project (
 import Test.Data.Scheduler (RequestFailure (..), RequestResult (..), Schedule (..), SchedulerState (..))
 import Test.Data.TestLog (DiagnosticEntry (..), TestLog (..))
 import Test.Log (withTestLog)
-import Test.Path (compileTmpDir, extDepName, fp, moduleName, moduleSourcePath, unitName, unitOutputDir, unitTmpDir)
+import Test.Path (compileTmpDir, extDepName, fp, moduleName, moduleSourcePath, unitDir, unitName, unitOutputDir, unitTmpDir)
 import Test.Scheduler (initScheduler, runScheduler)
 import qualified Types.Args as Args
 import Types.Args (Args (..))
@@ -69,7 +71,7 @@ runBuildTask ::
 runBuildTask env label tempName expectedCodes action =
   withTestLog False label \ (log, logVar) -> do
     let taskEnv = env.env {log, args = env.env.args {Args.tempDir = Just (fp tempDir)}}
-    createDirectoryIfMissing True tempDir
+    OsDir.createDirectoryIfMissing True tempDir
     success <- action taskEnv
     testLog <- readIORef logVar
     pure (requestResult expectedCodes success testLog)
@@ -81,8 +83,12 @@ runBuildTask env label tempName expectedCodes action =
 -- 'runBuildTask'.
 runMetadata :: SessionEnv -> (GenUnit BuildModule -> Args) -> GenUnit BuildModule -> IO RequestResult
 runMetadata env mkArgs unit = do
+  let args = mkArgs unit
+  -- Ensure the build plan output directory exists for incremental state files
+  for_ args.buildPlan \ bp ->
+    createDirectoryIfMissing True (takeDirectory (fp bp))
   runBuildTask env "metadata" (unitTmpDir unit.key) [] \ taskEnv -> do
-    fst <$> computeMetadata taskEnv {args = mkArgs unit}
+    fst <$> computeMetadata taskEnv {args}
 
 compileTarget :: ModuleKey -> ModuleTarget
 compileTarget key =
@@ -120,9 +126,16 @@ staticMetaArgs = [
 
 -- | Assemble the arguments passed to unit state initialization in a metadata step, resembling how the Buck rules
 -- provide them.
-metadataArgs :: SessionEnv -> GenUnit BuildModule -> Args
-metadataArgs env GenUnit {key, modules, depUnits} =
+--
+-- When @useIncremental@ is 'True', sets 'Args.buildPlan' and 'Args.actionMetadata' to enable incremental metadata.
+-- The ACTION_METADATA path is derived from the unit key: @tempDir/unitN/action_metadata.json@.
+-- Each unit reads its own per-unit file, matching the ghc-server setup where each metadata request has its own
+-- ACTION_METADATA path containing only that unit's sources.
+metadataArgs :: SessionEnv -> Bool -> GenUnit BuildModule -> Args
+metadataArgs env useIncremental GenUnit {key, modules, depUnits} =
   env.shared.baseArgs {
+    buildPlan = Just buildPlanOsPath,
+    actionMetadata = if useIncremental then Just (fp perUnitMetaPath) else Nothing,
     ghcOptions = staticMetaArgs ++ extDepDbArgs ++ thArgs ++ extDepPkgArgs ++ metaArgs ++ unitDepArgs ++ srcFiles
   }
   where
@@ -152,10 +165,14 @@ metadataArgs env GenUnit {key, modules, depUnits} =
 
     outDir = env.tempDir </> unitOutputDir key
 
+    perUnitMetaPath = env.tempDir </> unitDir key </> [osp|action_metadata.json|]
+
+    buildPlanOsPath = outDir </> [osp|build-plan.json|]
+
 -- | Add Buck cache paths for dependency build plans to 'metadataArgs' for a resume build metadata step.
-resumeMetadataArgs :: SessionEnv -> UnitCache -> GenUnit BuildModule -> Args
-resumeMetadataArgs env cache unit =
-  (metadataArgs env unit) {Args.cachedBuildPlans = cache.cachedBuildPlans}
+resumeMetadataArgs :: SessionEnv -> Bool -> UnitCache -> GenUnit BuildModule -> Args
+resumeMetadataArgs env useIncremental cache unit =
+  (metadataArgs env useIncremental unit) {Args.cachedBuildPlans = cache.cachedBuildPlans}
 
 errorCodeSet :: ModuleKey -> Set Natural
 errorCodeSet key =
@@ -179,15 +196,15 @@ resumeCompileArgs env fixErrors ModuleCache {cachedUnit, cachedDeps} key = do
       | otherwise = errorCodeSet key
 
 -- | Handlers for build steps specialized to the initial build's requirements.
-initialStrategy :: SessionEnv -> Component -> IO RequestResult
-initialStrategy env = \case
-  ComponentUnit unit -> runMetadata env (metadataArgs env) unit
+initialStrategy :: SessionEnv -> Bool -> Component -> IO RequestResult
+initialStrategy env useIncremental = \case
+  ComponentUnit unit -> runMetadata env (metadataArgs env useIncremental) unit
   ComponentModule key -> runCompile env (initialCompileArgs env) key
 
 -- | Handlers for build steps specialized to the resume build's requirements.
-resumeStrategy :: SessionEnv -> Bool -> ResumeComponent -> IO RequestResult
-resumeStrategy env fixErrors = \case
-  ResumeUnit unit cache -> runMetadata env (resumeMetadataArgs env cache) unit
+resumeStrategy :: SessionEnv -> Bool -> Bool -> ResumeComponent -> IO RequestResult
+resumeStrategy env useIncremental fixErrors = \case
+  ResumeUnit unit cache -> runMetadata env (resumeMetadataArgs env useIncremental cache) unit
   ResumeModule key cache -> runCompile env (resumeCompileArgs env fixErrors cache) key
 
 -- | Extract the data required for properties and classifiers from the final state of the scheduler after a build.
