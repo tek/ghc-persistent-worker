@@ -142,6 +142,8 @@ decodeJsonBuildPlan =
 --
 -- If GHC has fixed module graph nodes, those are constructed; otherwise we have to call 'summariseFile' to create a
 -- full node, which parses the module.
+--
+-- TODO Use feature flag in initial metadata as well
 loadCachedModule :: Bool -> HscEnv -> UnitId -> JsonFs ModuleName -> CachedModule -> IO ModuleGraphNode
 loadCachedModule useFixedNodes hsc_env unit (JsonFs modName) CachedModule {source, modules, packages} = do
   node <- createNode source modName
