@@ -34,7 +34,7 @@ import Internal.Log (logDebugD, logTimed, logTimedD)
 import Internal.State (updateMakeState)
 import qualified Internal.State.Make as Make
 import Internal.State.Make (insertUnitEnv, storeModuleGraph)
-import Types.BuckArgs (CachedBuckArgs (..), parseCachedBuckArgs)
+import Types.BuckArgs (CachedBuckArgs (..), parseCachedBuckArgsCli)
 import Types.CachedDeps (
   CachedBuildPlan (..),
   CachedBuildPlans (..),
@@ -205,7 +205,7 @@ loadCachedArgs ::
   StateT WorkerState IO ()
 loadCachedArgs path = do
   cachedArgs <- liftIO $ readFile path
-  case parseCachedBuckArgs (lines cachedArgs) of
+  case parseCachedBuckArgsCli (lines cachedArgs) of
     Right args -> modifyM (setupPath args.cachedBinPath)
     Left err -> liftIO $ throwIO (userError err)
 

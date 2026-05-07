@@ -37,7 +37,7 @@ import System.Directory (createDirectoryIfMissing)
 import System.Exit (exitFailure)
 import System.Process (ProcessHandle, getProcessExitCode, spawnProcess)
 import Types.Args (TargetId)
-import Types.BuckArgs (BuckArgs (workerTargetId), parseBuckArgs)
+import Types.BuckArgs (BuckArgs (workerTargetId), parseBuckArgsCli)
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Orchestration (
   PrimarySocketName (..),
@@ -87,7 +87,7 @@ proxyHandler workerMap command socketDefault socketOverride req = do
       -- from the gRPC socket path if the key is absent from the env.
       -- If an override was specified on the command line with @--socket-name@, it has precedence over both.
       socketId = fromMaybe socketDefault (socketOverride <|> coerce (cmdEnv.values !? "BUCK_BUILD_ID"))
-  buckArgs <- either (throwIO . userError) pure (parseBuckArgs cmdEnv (RequestArgs argv))
+  buckArgs <- either (throwIO . userError) pure (parseBuckArgsCli cmdEnv (RequestArgs argv))
   case buckArgs.workerTargetId of
     Nothing -> throwIO (userError "No --worker-target-id passed")
     Just targetId -> do

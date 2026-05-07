@@ -1,7 +1,8 @@
 {-# LANGUAGE CPP #-}
 
 module Main where
- 
+
+import BuckArgsTest (test_parseBuckArgs)
 import BuildPlanTest (test_buildPlan)
 import IncrementalMetadataTest (test_incremental)
 import ProfileTest (test_profiling)
@@ -36,6 +37,7 @@ fullTest = False
 testsGeneral :: [TestTree]
 testsGeneral =
   [
+    test_parseBuckArgs,
     test_sortScheduleOrder,
     test_projectBuild,
     test_incremental

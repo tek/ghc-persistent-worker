@@ -40,14 +40,15 @@ import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
 import System.OsPath (encodeUtf)
 
 -- | CLI argument parser for the client.
+--
+-- Parses only client-local options (@--wait@) and the project root.
+-- All remaining arguments (after @--@) are passed verbatim to the server.
 clientConfigParser :: Parser ClientConfig
 clientConfigParser = do
   projectRoot <- argument readOsPath (metavar "PROJECT_ROOT" <> help "Path to the project root directory")
   wait <- switch (long "wait" <> short 'w' <> help "Wait for the build to complete before returning")
-  recompile <- switch (long "recompile" <> help "Recompile modules even when cached artifacts exist")
-  rebuild <- switch (long "rebuild" <> help "Recompute metadata and recompile even when cached")
-  targets <- many (strArgument (metavar "TARGETS..." <> help "Schedule targets (e.g. unit1 unit2:metadata unit2:Module)"))
-  pure ClientConfig {..}
+  targets <- many (strArgument (metavar "ARGS..." <> help "Arguments passed verbatim to the server (use -- to pass flags)"))
+  pure ClientConfig {projectRoot, wait, targets}
   where
     readOsPath =
       eitherReader (first show <$> encodeUtf)
@@ -78,8 +79,6 @@ client config = do
 
     flagArgs =
       ["--wait" | config.wait]
-      ++ ["--recompile" | config.recompile]
-      ++ ["--rebuild" | config.rebuild]
 
 -- | Parse CLI args and run the client command.
 runClient :: IO ()

@@ -11,14 +11,14 @@ import System.Environment (getArgs, lookupEnv)
 import System.Exit (exitFailure)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
 import Types.Args (Args (..))
-import Types.BuckArgs (parseBuckArgs, toGhcArgs)
+import Types.BuckArgs (parseBuckArgsCli, toGhcArgs)
 import Types.Env (Env (..))
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Log (Log, Logger (..), TraceId (..), newLog)
 
 envFromArgs :: [String] -> IO (Env, MVar Log)
 envFromArgs argv = do
-  buckArgs <- either parseError pure (parseBuckArgs (CommandEnv []) (RequestArgs argv))
+  buckArgs <- either parseError pure (parseBuckArgsCli (CommandEnv []) (RequestArgs argv))
   args <- toGhcArgs buckArgs Nothing
   actionMetadata <- lookupEnv "ACTION_METADATA"
   let args' = args {actionMetadata}

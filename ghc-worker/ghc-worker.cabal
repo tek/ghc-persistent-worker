@@ -86,7 +86,8 @@ executable ghc-worker
   else
       ghc-options: -O2 -threaded "-with-rtsopts=-K512M -I5 -A128M -T -N"
   build-depends:
-    ghc-worker
+    ghc-worker,
+    optparse-applicative
 
 test-suite ghc-worker-test
   import: all
@@ -94,6 +95,7 @@ test-suite ghc-worker-test
   main-is: Main.hs
   hs-source-dirs: test
   other-modules:
+    BuckArgsTest,
     BuildPlanTest,
     FlagParserTest,
     IncrementalMetadataTest,

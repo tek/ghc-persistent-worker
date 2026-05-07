@@ -57,6 +57,7 @@ library
     filepath,
     ghc,
     ghc-paths,
+    optparse-applicative,
     split,
     text
 

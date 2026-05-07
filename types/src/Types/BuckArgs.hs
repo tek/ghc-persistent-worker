@@ -1,10 +1,11 @@
+{-# LANGUAGE ApplicativeDo #-}
+
 module Types.BuckArgs where
 
 import Control.Applicative ((<|>))
 import Control.Exception (throwIO)
-import Control.Monad (join)
+import Control.Monad (guard, join)
 import Data.Aeson (FromJSON, eitherDecodeFileStrict')
-import Data.Coerce (coerce)
 import Data.Foldable (toList)
 import Data.List (dropWhileEnd, intercalate)
 import Data.List.NonEmpty (NonEmpty, nonEmpty)
@@ -16,11 +17,34 @@ import Data.Maybe (fromMaybe, isJust)
 import GHC (mkModule, mkModuleName)
 import GHC.Paths (libdir)
 import GHC.Unit (Definite (..), GenUnit (RealUnit), stringToUnitId)
+import Options.Applicative (
+  Parser,
+  ParserInfo,
+  ParserResult (..),
+  ReadM,
+  defaultPrefs,
+  eitherReader,
+  execParserPure,
+  flag,
+  forwardOptions,
+  fullDesc,
+  help,
+  info,
+  long,
+  many,
+  metavar,
+  option,
+  optional,
+  renderFailure,
+  short,
+  strArgument,
+  strOption,
+  switch,
+  )
 import System.FilePath (takeDirectory)
 import System.OsPath (encodeFS)
-import qualified Types.Args
 import Types.Args (
-  Args (Args),
+  Args (..),
   BuildPlanField (..),
   TargetId (..),
   UnitName (..),
@@ -39,16 +63,15 @@ data Mode =
   ModeLink
   |
   ModeMetadata
-  |
-  ModeUnknown String
   deriving stock (Eq, Show)
 
-parseMode :: String -> Mode
-parseMode = \case
-  "compile" -> ModeCompile
-  "link" -> ModeLink
-  "metadata" -> ModeMetadata
-  mode -> ModeUnknown mode
+optionMode :: ReadM Mode
+optionMode =
+  eitherReader \case
+    "compile" -> Right ModeCompile
+    "link" -> Right ModeLink
+    "metadata" -> Right ModeMetadata
+    mode -> Left ("Invalid worker mode '" ++ mode ++ "', must be [compile|link|metdata]")
 
 data IsInterpreted =
   Compiled
@@ -56,6 +79,7 @@ data IsInterpreted =
   Interpreted
   deriving stock (Eq, Show)
 
+-- | All Buck-specific arguments parsed from a gRPC request.
 data BuckArgs =
   BuckArgs {
     topdir :: Maybe String,
@@ -80,9 +104,7 @@ data BuckArgs =
     ghcDbFile :: Maybe String,
     ghcArgsFile :: Maybe String,
     ghcOptions :: [String],
-    multiplexerCustom :: Bool,
     mode :: Maybe Mode,
-    envKey :: Maybe String,
     closeInput :: Maybe String,
     closeOutput :: Maybe String,
     isBinary :: Bool,
@@ -90,110 +112,73 @@ data BuckArgs =
   }
   deriving stock (Eq, Show)
 
-emptyBuckArgs :: Map String String -> BuckArgs
-emptyBuckArgs env =
-  BuckArgs {
-    topdir = Nothing,
-    abiOut = Nothing,
-    buck2Dep = Nothing,
-    buck2PackageDb = [],
-    buck2PackageDbDep = Nothing,
-    unit = Nothing,
-    buildPlan = Nothing,
-    fields = Nothing,
-    moduleName = Nothing,
-    depModules = Nothing,
-    depUnits = Nothing,
-    homeUnit = Nothing,
-    workerTargetId = Nothing,
-    pluginDb = Nothing,
-    env,
-    binPath = [],
-    tempDir = env !? "TMPDIR",
-    ghcDirFile = Nothing,
-    ghcDbFile = Nothing,
-    ghcArgsFile = Nothing,
-    ghcOptions = [],
-    multiplexerCustom = False,
-    mode = Nothing,
-    envKey = Nothing,
-    closeInput = Nothing,
-    closeOutput = Nothing,
-    isBinary = False,
-    interp = Compiled
+-- | Shorthand for an optional string option with a long name and uppercase metavar.
+opt :: String -> String -> Parser (Maybe String)
+opt name var = optional (strOption (long name <> metavar var))
+
+parserBinPath :: Parser FilePath
+parserBinPath =
+  strOption (long "bin-path" <> metavar "PATH" <> help "Add a directory to $PATH")
+  <|>
+  (takeDirectory <$> strOption (long "bin-exe" <> metavar "EXE" <> help "Add the directory containing EXE to $PATH"))
+
+-- | Parser for all known Buck worker options.
+--
+-- Unknown flags are collected as positional arguments via 'forwardOptions' on the 'ParserInfo'.
+--
+-- @-B@, @-c@ and @-M@ are recognized directly as short flags to avoid capturing them as GHC passthrough.
+buckArgsParser :: CommandEnv -> Parser BuckArgs
+buckArgsParser (CommandEnv baseEnv) = do
+  topdir <- optional (strOption (short 'B' <> metavar "PATH"))
+  abiOut <- opt "abi-out" "PATH"
+  buck2Dep <- opt "buck2-dep" "PATH"
+  buck2PackageDb <- many (strOption (long "buck2-package-db" <> metavar "PATH"))
+  buck2PackageDbDep <- opt "buck2-packagedb-dep" "PATH"
+  depModules <- opt "dep-modules" "FILE"
+  depUnits <- opt "dep-units" "FILE"
+  homeUnit <- opt "home-unit" "FILE"
+  envKeys <- many (strOption (long "extra-env-key" <> metavar "KEY"))
+  envValues <- many (strOption (long "extra-env-value" <> metavar "VALUE"))
+  workerTargetId <- optional (option (TargetId <$> eitherReader Right) (long "worker-target-id" <> metavar "ID"))
+  pluginDb <- opt "plugin-db" "PATH"
+  ghcDirFile <- opt "ghc-dir" "FILE"
+  unit <- opt "unit" "NAME"
+  buildPlan <- opt "build-plan" "FILE"
+  rawFields <- opt "fields" "FIELDS"
+  moduleName <- opt "module" "MODULE"
+  ghcArgsFile <- opt "ghc-args" "FILE"
+  ghcDbFile <- opt "extra-pkg-db" "PATH"
+  binPath <- many parserBinPath
+  workerMode <- optional (option optionMode (long "worker-mode" <> metavar "MODE"))
+  modeCompile <- switch (short 'c')
+  modeMetadata <- switch (short 'M')
+  isBinary <- switch (long "unit-is-binary")
+  closeInput <- opt "close-input" "PATH"
+  closeOutput <- opt "close-output" "PATH"
+  interp <- flag Compiled Interpreted (long "interp")
+  ghcOptions <- many (strArgument (metavar "GHC_ARGS"))
+  pure BuckArgs {
+    fields = nonEmpty . splitOn "," =<< rawFields,
+    env = Map.union (Map.fromList (zip envKeys envValues)) baseEnv,
+    tempDir = Map.lookup "TMPDIR" baseEnv,
+    mode =
+      workerMode
+      <|> (ModeCompile <$ guard modeCompile)
+      <|> (ModeMetadata <$ guard modeMetadata)
+      <|> (ModeCompile <$ moduleName),
+    ..
   }
 
-options :: Map String ([String] -> BuckArgs -> Either String ([String], BuckArgs))
-options =
-  [
-    withArg "--abi-out" \ z a -> z {abiOut = Just a},
-    withArg "--buck2-dep" \ z a -> z {buck2Dep = Just a},
-    withArg "--buck2-package-db" \ z a -> z {buck2PackageDb = a : z.buck2PackageDb},
-    withArg "--buck2-packagedb-dep" \ z a -> z {buck2PackageDbDep = Just a},
-    withArg "--dep-modules" \ z a -> z {depModules = Just a},
-    withArg "--dep-units" \ z a -> z {depUnits = Just a},
-    withArg "--home-unit" \ z a -> z {homeUnit = Just a},
-    withArg "--extra-env-key" \ z a -> z {envKey = Just a},
-    withArgErr "--extra-env-value" \ z a -> addEnv z a,
-    withArg "--worker-target-id" \ z a -> z {workerTargetId = Just (TargetId a)},
-    withArg "--worker-socket" const,
-    withArg "--plugin-db" \ z a -> z {pluginDb = Just a},
-    withArg "--ghc-dir" \ z a -> z {ghcDirFile = Just a},
-    withArg "--unit" \ z a -> z {unit = Just a},
-    withArg "--build-plan" \ z a -> z {buildPlan = Just a},
-    withArg "--fields" \ z a -> z {fields = nonEmpty (splitOn "," a)},
-    withArg "--module" \ z a -> z {moduleName = Just a},
-    withArg "--ghc-args" \ z a -> z {ghcArgsFile = Just a},
-    withArg "--extra-pkg-db" \ z a -> z {ghcDbFile = Just a},
-    withArg "--bin-path" \ z a -> z {binPath = a : z.binPath},
-    withArg "--bin-exe" \ z a -> z {binPath = takeDirectory a : z.binPath},
-    withArg "--worker-mode" \ z a -> z {mode = Just (parseMode a)},
-    flag "--worker-multiplexer-custom" \ z -> z {multiplexerCustom = True},
-    flag "--unit-is-binary" \ z -> z {isBinary = True},
-    withArg "--close-input" \z a -> z {closeInput = Just a},
-    withArg "--close-output" \z a -> z {closeOutput = Just a},
-    flag "--interp" \ z -> z {interp = Interpreted},
-    ("-c", \ rest z -> Right (rest, z {mode = Just ModeCompile})),
-    ("-M", \ rest z -> Right (rest, z {mode = Just ModeMetadata}))
-  ]
-  where
-    addEnv z a = case z.envKey of
-      Just key -> Right z {env = Map.insert key a z.env, envKey = Nothing}
-      Nothing -> Left ("--extra-env-value used without preceding --extra-env-key (arg: " ++ a ++ ")")
+buckArgsCli :: CommandEnv -> ParserInfo BuckArgs
+buckArgsCli env =
+  info (buckArgsParser env) (fullDesc <> forwardOptions)
 
-    flag name f = (name, \ rest z -> Right (rest, f z))
-
-    withArg name f = (name, \ argv z -> takeArg name argv (Right . f z))
-
-    withArgErr name f = (name, \ argv z -> takeArg name argv (f z))
-
-    takeArg name argv store = case argv of
-      [] -> Left (name ++ " needs an argument")
-      arg : rest -> do
-        new <- store arg
-        Right (rest, new)
-
-parseBuckArgs :: CommandEnv -> RequestArgs -> Either String BuckArgs
-parseBuckArgs env =
-  spin (emptyBuckArgs (coerce env)) . coerce
-  where
-    spin z = \case
-      ('-' : 'B' : path) : rest -> spin z {topdir = Just path} rest
-      arg : args -> do
-        (rest, new) <- fromMaybe (equalsArg arg) (options !? arg) args z
-        spin new rest
-      [] -> Right z {ghcOptions = reverse z.ghcOptions}
-
-    -- For @--worker-target-id=worker1@ style args
-    equalsArg arg rest z
-      | (name, '=' : value) <- break ('=' ==) arg
-      , Just handler <- options !? name
-      = handler (value : rest) z
-      | otherwise
-      = ghcOption arg rest z
-
-    -- Let GHC handle the arg
-    ghcOption arg rest z = Right (rest, z {ghcOptions = arg : z.ghcOptions})
+parseBuckArgsCli :: CommandEnv -> RequestArgs -> Either String BuckArgs
+parseBuckArgsCli env (RequestArgs args) =
+  case execParserPure defaultPrefs (buckArgsCli env) args of
+    Success a -> Right a
+    Failure f -> Left (fst (renderFailure f "ghc-worker"))
+    CompletionInvoked _ -> Left "completion invoked"
 
 decodeJsonArg ::
   FromJSON a =>
@@ -263,6 +248,7 @@ toGhcArgs args featureFlags = do
     homeUnit = args.homeUnit,
     isBinary = args.isBinary,
     featureFlags = fromMaybe defaultFeatureFlags featureFlags,
+    -- TODO can this be an arg?
     actionMetadata = args.env !? "ACTION_METADATA"
   }
   where
@@ -276,40 +262,17 @@ data CachedBuckArgs =
   }
   deriving stock (Eq, Show)
 
-emptyCachedBuckArgs :: CachedBuckArgs
-emptyCachedBuckArgs =
-  CachedBuckArgs {
-    cachedBinPath = []
-  }
+cachedBuckArgsParser :: Parser CachedBuckArgs
+cachedBuckArgsParser = do
+  cachedBinPath <- many parserBinPath
+  pure CachedBuckArgs {..}
 
-cachedOptions :: Map String ([String] -> CachedBuckArgs -> Either String ([String], CachedBuckArgs))
-cachedOptions =
-  [
-    withArg "--bin-path" \ z a -> z {cachedBinPath = a : z.cachedBinPath},
-    withArg "--bin-exe" \ z a -> z {cachedBinPath = takeDirectory a : z.cachedBinPath}
-  ]
-  where
-    withArg name f = (name, \ argv z -> takeArg name argv (Right . f z))
+cachedBuckArgsCli :: ParserInfo CachedBuckArgs
+cachedBuckArgsCli = info cachedBuckArgsParser fullDesc
 
-    takeArg name argv store = case argv of
-      [] -> Left (name ++ " needs an argument")
-      arg : rest -> do
-        new <- store arg
-        Right (rest, new)
-
-parseCachedBuckArgs :: [String] -> Either String CachedBuckArgs
-parseCachedBuckArgs =
-  spin emptyCachedBuckArgs
-  where
-    spin z = \case
-      arg : args -> do
-        (rest, new) <- fromMaybe (equalsArg arg) (cachedOptions !? arg) args z
-        spin new rest
-      [] -> Right z
-
-    equalsArg arg rest z
-      | (name, '=' : value) <- break ('=' ==) arg
-      , Just handler <- cachedOptions !? name
-      = handler (value : rest) z
-      | otherwise
-      = Left ("Unknown option in cached Buck args: " ++ arg)
+parseCachedBuckArgsCli :: [String] -> Either String CachedBuckArgs
+parseCachedBuckArgsCli args =
+  case execParserPure defaultPrefs cachedBuckArgsCli args of
+    Success a -> Right a
+    Failure f -> Left (fst (renderFailure f "ghc-worker"))
+    CompletionInvoked _ -> Left "completion invoked"

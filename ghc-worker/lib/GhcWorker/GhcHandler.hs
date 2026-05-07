@@ -28,7 +28,7 @@ import Internal.Session (withGhcMakeModule, withGhcMakeSource)
 import Prelude hiding (log)
 import Types.Args (Args (..))
 import qualified Types.BuckArgs
-import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), parseBuckArgs, toGhcArgs)
+import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), parseBuckArgsCli, toGhcArgs)
 import Types.Env (Env (..))
 import Types.FeatureFlags (FeatureFlags (..))
 import Types.Grpc (RequestArgs (..))
@@ -151,7 +151,7 @@ ghcHandler state featureFlags instrument traceId =
   InstrumentedHandler \ hooks -> GrpcHandler \ commandEnv argv -> do
     log <- newLogger <$> newLog traceId
     result <- try do
-      buckArgs <- either parseError pure (parseBuckArgs commandEnv argv)
+      buckArgs <- either parseError pure (parseBuckArgsCli commandEnv argv)
       args <- toGhcArgs buckArgs (Just featureFlags)
       log.debug (unlines (coerce argv))
       let env = Env {log, state, args = args}
