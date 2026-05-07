@@ -244,6 +244,116 @@ writeModuleSource root depth modMap extDeps m = do
   writeFile (dir ++ "/" ++ mName ++ ".hs") source
 
 -- ---------------------------------------------------------------------------
+-- Production mode: binary tree of small units + one large downstream unit
+-- ---------------------------------------------------------------------------
+
+-- | Write a production-topology project: a binary tree of small units (3 modules each) with one
+-- large downstream unit that depends on all other units.
+writeProductionProject :: FilePath -> Int -> Int -> Maybe ExtDepsConfig -> IO ()
+writeProductionProject root depth bigUnitModsPerLevel extDeps = do
+  let treeUnits = wideUnitCount depth
+  -- Write binary tree units (1-indexed heap layout, 3 modules each)
+  traverse_ (writeWideUnit root treeUnits 3 extDeps) ([1 .. treeUnits] :: [Int])
+  -- Write the big downstream unit that depends on the root of the tree (unit1)
+  writeProductionBigUnit root treeUnits bigUnitModsPerLevel extDeps
+
+-- | Number of levels in the big unit's dependency chain.
+productionLevels :: Int
+productionLevels = 20
+
+-- | Write the large downstream unit for production mode.
+-- Structure: 20 levels × N modules per level, plus a BigMain module.
+-- Each module at level L imports the corresponding module at level L+1.
+-- BigMain imports all level-0 modules.
+writeProductionBigUnit :: FilePath -> Int -> Int -> Maybe ExtDepsConfig -> IO ()
+writeProductionBigUnit root treeUnits modsPerLevel extDeps = do
+  let bigName = "unitbig"
+      dir = root ++ "/" ++ bigName
+      -- Depend on the tree root
+      deps = [unitName 1]
+      args = maybe [] extDepArgs extDeps
+      config = UnitConfig {deps, args}
+  createDirectoryIfMissing True dir
+  LBS.writeFile (dir ++ "/unit.json") (encode config)
+  -- Write level modules: BigL<level>M<idx>
+  traverse_ (\(level, idx) -> writeProductionLevelModule dir modsPerLevel extDeps level idx)
+    [(l, m) | l <- [0 .. productionLevels - 1], m <- [0 .. modsPerLevel - 1]]
+  -- Write the main module
+  writeProductionMainModule dir modsPerLevel extDeps
+
+-- | Module name for a level module: @BigL<level>M<idx>@
+productionModName :: Int -> Int -> String
+productionModName level idx = "BigL" ++ show level ++ "M" ++ show idx
+
+-- | Write a single level module.
+-- Each module at level L imports the module at level L+1 with the same index.
+writeProductionLevelModule :: FilePath -> Int -> Maybe ExtDepsConfig -> Int -> Int -> IO ()
+writeProductionLevelModule dir modsPerLevel extDeps level idx = do
+  let mName = productionModName level idx
+      depImport
+        | level < productionLevels - 1 =
+            let depName = productionModName (level + 1) idx
+                depVal = "value_" ++ show (level + 1) ++ "_" ++ show idx
+            in ["import " ++ depName ++ " (" ++ depVal ++ ")"]
+        | otherwise = []
+
+      extImports = case extDeps of
+        Nothing -> []
+        Just cfg | level == productionLevels - 1 ->
+          ["import " ++ extDepModuleName i ++ " (" ++ extDepValueName i ++ ")"
+          | i <- take 1 cfg.extDepIndexes]
+        _ -> []
+
+      valName = "value_" ++ show level ++ "_" ++ show idx
+      depVal = "value_" ++ show (level + 1) ++ "_" ++ show idx
+
+      valueExpr
+        | level < productionLevels - 1 = depVal ++ " + " ++ show (level * modsPerLevel + idx)
+        | otherwise = case extDeps of
+            Just cfg -> intercalate " + " [extDepValueName i | i <- take 1 cfg.extDepIndexes]
+                        ++ " + " ++ show (level * modsPerLevel + idx)
+            Nothing -> show (level * modsPerLevel + idx)
+
+      source = unlines $
+        ["module " ++ mName ++ " where"]
+        ++ depImport
+        ++ extImports
+        ++ [""]
+        ++ [valName ++ " :: Int"]
+        ++ [valName ++ " = " ++ valueExpr]
+  writeFile (dir ++ "/" ++ mName ++ ".hs") source
+
+-- | Write the BigMain module that imports all level-0 modules and the cross-unit dep.
+writeProductionMainModule :: FilePath -> Int -> Maybe ExtDepsConfig -> IO ()
+writeProductionMainModule dir modsPerLevel extDeps = do
+  let mName = "BigMain"
+      l0Imports =
+        ["import " ++ productionModName 0 idx ++ " (value_0_" ++ show idx ++ ")"
+        | idx <- [0 .. modsPerLevel - 1]]
+      crossImport = ["import U1M0 (val_0)"]
+      extImports = case extDeps of
+        Nothing -> []
+        Just cfg -> ["import " ++ extDepModuleName i ++ " (" ++ extDepValueName i ++ ")"
+                    | i <- take 1 cfg.extDepIndexes]
+      localValues = ["value_0_" ++ show idx | idx <- [0 .. modsPerLevel - 1]]
+      valueExpr = case extDeps of
+        Just cfg -> intercalate " + " (["val_0"] ++ [extDepValueName i | i <- take 1 cfg.extDepIndexes] ++ localValues)
+        Nothing -> intercalate " + " ("val_0" : localValues)
+      source = unlines $
+        ["module " ++ mName ++ " where"]
+        ++ crossImport
+        ++ l0Imports
+        ++ extImports
+        ++ [""]
+        ++ ["main_value :: Int"]
+        ++ ["main_value = " ++ valueExpr]
+  writeFile (dir ++ "/" ++ mName ++ ".hs") source
+
+-- | Total unit count for production mode.
+productionUnitCount :: Int -> Int
+productionUnitCount depth = wideUnitCount depth + 1
+
+-- ---------------------------------------------------------------------------
 -- Wide mode: binary tree of units with fixed module count
 -- ---------------------------------------------------------------------------
 
@@ -306,7 +416,63 @@ wideModuleSource uid mid modsPerUnit extDeps childUids =
           intercalate " + " allValues ++ " + 1"
       | otherwise = show (uid * modsPerUnit + mid)
 
--- | Write a wide-mode project to disk.
+-- | Write a flat single-unit project to disk.
+--
+-- Generates one unit (@unit1@) with @numModules@ modules.
+-- Module 0 imports all other modules; other modules are leaf modules with no imports.
+-- Designed for profiling incremental metadata: modifying module 0 triggers a metadata rerun
+-- where all other modules can be served from cache.
+writeFlatProject :: FilePath -> Int -> Maybe ExtDepsConfig -> IO ()
+writeFlatProject root numModules extDeps = do
+  let uName = "unit1"
+      dir = root ++ "/" ++ uName
+      args = maybe [] extDepArgs extDeps
+      config = UnitConfig {deps = [], args}
+  createDirectoryIfMissing True dir
+  LBS.writeFile (dir ++ "/unit.json") (encode config)
+  traverse_ (writeFlatModule dir numModules extDeps) ([0 .. numModules - 1] :: [Int])
+
+-- | Write a single module for flat mode.
+writeFlatModule :: FilePath -> Int -> Maybe ExtDepsConfig -> Int -> IO ()
+writeFlatModule dir numModules extDeps mid = do
+  let mName = flatModuleName mid
+      path = dir ++ "/" ++ mName ++ ".hs"
+      imports
+        | mid == 0 = map flatModuleName [1 .. numModules - 1]
+        | otherwise = []
+      extImports = maybe [] (map extDepModuleName . (.extDepIndexes)) extDeps
+      extValues = maybe [] (\cfg -> [extDepModuleName i ++ "." ++ extDepValueName i | i <- cfg.extDepIndexes]) extDeps
+      allImports = imports ++ extImports
+      importLines = map ("import qualified " ++) allImports
+      body
+        | mid == 0, not (null allImports) =
+          let homeRefs = map (\m -> m ++ ".value") imports
+              allRefs = homeRefs ++ extValues
+              -- Group refs into chunks of 50 to avoid excessively long lines
+              chunks = chunksOf 50 allRefs
+              chunkBindings = zipWith chunkBinding [(0 :: Int) ..] chunks
+              chunkBinding i cs = "chunk" ++ show i ++ " :: Int\nchunk" ++ show i ++ " = " ++ intercalate " + " cs
+              chunkRefs = ["chunk" ++ show i | i <- [0 .. length chunks - 1]]
+              topBinding = "m0_value :: Int\nm0_value = " ++ intercalate " + " chunkRefs
+          in unlines (chunkBindings ++ [topBinding])
+        | otherwise =
+          "value :: Int\nvalue = " ++ show mid
+  writeFile path $ unlines $
+    ["module " ++ mName ++ " where", ""] ++
+    importLines ++
+    ["", body, ""]
+
+-- | Module name for flat mode.
+flatModuleName :: Int -> String
+flatModuleName i = "M" ++ show i
+
+-- | Split a list into chunks of at most @n@ elements.
+chunksOf :: Int -> [a] -> [[a]]
+chunksOf _ [] = []
+chunksOf n xs =
+  let (chunk, rest) = splitAt n xs
+  in chunk : chunksOf n rest
+
 writeWideProject :: FilePath -> Int -> Int -> Maybe ExtDepsConfig -> IO ()
 writeWideProject root depth modsPerUnit extDeps = do
   let total = wideUnitCount depth

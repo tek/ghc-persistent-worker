@@ -29,6 +29,7 @@ import Options.Applicative (
   value,
   (<**>),
   )
+import Types.FeatureFlags (FeatureFlags (..))
 import System.Directory.OsPath (createDirectoryIfMissing)
 import System.Exit (die)
 import System.IO (BufferMode (..), hPutStrLn, hSetBuffering, stderr, stdout)
@@ -42,11 +43,29 @@ serverConfigParser =
     <*> option auto (long "jobs" <> short 'j' <> metavar "N" <> help "Maximum concurrent jobs" <> value 4)
     <*> switch (long "verbose" <> short 'v' <> help "Print the build log on success")
     <*> switch (long "cabal" <> help "Use .cabal file for project discovery")
+    <*> featureFlagsParser
   where
     readOsPath = str >>= \ s ->
       case encodeUtf s of
         Right p -> pure p
         Left e -> fail ("Invalid path: " ++ show e)
+
+-- | Parser for runtime feature flags.
+-- Each flag accepts @true@ or @false@ (default: @true@).
+featureFlagsParser :: Parser FeatureFlags
+featureFlagsParser =
+  FeatureFlags
+    <$> boolOption "fixed-nodes" "Use fixed module graph nodes for cached modules"
+    <*> boolOption "fast-flag-parser" "Use the fast flatparse-based flag parser"
+    <*> boolOption "incremental-metadata" "Use incremental metadata (only re-downsweep changed modules)"
+  where
+    boolOption name desc =
+      option readBool (long name <> metavar "BOOL" <> help desc <> value True)
+
+    readBool = str >>= \case
+      "true" -> pure True
+      "false" -> pure False
+      other -> fail ("Expected 'true' or 'false', got: " ++ other)
 
 serverParserInfo :: ParserInfo ServerConfig
 serverParserInfo =

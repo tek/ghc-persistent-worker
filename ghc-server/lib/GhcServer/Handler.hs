@@ -19,7 +19,7 @@ import Network.GRPC.Server.StreamType (Methods)
 import Prelude hiding (log)
 import Proto.Worker (Worker)
 import System.OsPath ((</>))
-import Types.Args (emptyArgs)
+import Types.Args (Args (..), emptyArgs)
 import Types.Grpc (RequestArgs (..))
 
 -- | Parsed schedule command with optional flags.
@@ -131,7 +131,7 @@ serverHandler config = do
   events <- newBuildEvents
   let
     env = BuildEnv {
-      baseArgs = emptyArgs Map.empty,
+      baseArgs = (emptyArgs Map.empty) {featureFlags = config.featureFlags},
       projectRoot = config.projectRoot,
       outputDir,
       tmpDir,

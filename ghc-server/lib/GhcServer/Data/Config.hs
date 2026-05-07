@@ -2,6 +2,7 @@
 module GhcServer.Data.Config where
 
 import System.OsPath (OsPath)
+import Types.FeatureFlags (FeatureFlags (..))
 
 -- | Configuration for the server, parsed from CLI args.
 data ServerConfig =
@@ -13,7 +14,9 @@ data ServerConfig =
     -- | Print the build log even when steps succeed.
     verbose :: Bool,
     -- | Use Cabal file for project discovery instead of @unit.json@ files.
-    cabal :: Bool
+    cabal :: Bool,
+    -- | Runtime feature flags.
+    featureFlags :: FeatureFlags
   }
   deriving stock (Show)
 
