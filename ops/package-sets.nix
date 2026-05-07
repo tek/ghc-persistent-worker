@@ -49,7 +49,7 @@
 
   defaultEnv = extra: {
     hls.enable = lib.mkForce false;
-    package-set.extends = "mwb-26-01";
+    package-set.extends = "mwb-26-04";
     overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache"] ++ [ipeOverrides] ++ extra;
   };
 
@@ -63,29 +63,26 @@ in {
     overrides = [envOverrides ({notest, ...}: { ghc-worker = notest; })];
   };
 
+  envs.ghc914 = {
+    expose.scoped = true;
+    package-set.extends = "ghc914";
+    overrides = commonOverrides [] ++ [buckBinOverrides];
+  };
+
   envs.dev = defaultEnv [] // {
     buildInputs = pkgs: [pkgs.zlib pkgs.snappy pkgs.protobuf build.envs.dev.toolchain.packages.proto-lens-protoc];
   };
 
   envs.min = defaultEnv [];
 
-  envs.mwb-25-10 = {
+  envs.mwb-26-04 = defaultEnv [buckBinOverrides] // {
     expose.scoped = true;
-    package-set.extends = "mwb-25-10";
-    overrides = commonOverrides ["mwb-25-10"] ++ [buckBinOverrides ipeOverrides];
-    packages = [
-      "ghc-proxy"
-      "ghc-worker"
-      "buck-proxy"
-      "buck-worker-internal"
-      "buck-worker-grpc"
-      "buck-worker-proto"
-      "buck-worker-types"
-    ];
   };
 
-  envs.mwb-26-01 = defaultEnv [buckBinOverrides] // {
+  envs.mwb-26-04-fixed = defaultEnv [buckBinOverrides] // {
     expose.scoped = true;
+    package-set.extends = "mwb-26-04-fixed";
+    overrides = commonOverrides ["mwb" "unit-index" "downsweep-cache" "fixed-nodes"] ++ [buckBinOverrides ipeOverrides];
   };
 
   envs.profiled = defaultEnv [({notest, ...}: { ghc-worker = notest; ghc-server = notest; })];
@@ -194,8 +191,8 @@ in {
     tls = hackage "2.2.2" "1arnw38a3x70264sags3yrq4c01nfcy17sjq3ycasfb2yq6fiflm";
   };
 
-  package-sets.mwb-26-01 = {
-    compiler = "mwb-26-01-ipe";
+  package-sets.mwb-26-04 = {
+    compiler = "mwb-26-04";
     overrides = {hackage, force, source, self, ...}: {
       auto-update = hackage "0.2.6" "0sp25j3fcgmfr2zv1ccg1id1iynj3azinjg23g0vy1m1m7gnmkzi";
       crypton-asn1-encoding = hackage "0.10.0" "0h4cxk9yz2xgmx0kl3gg9lixhnhvxqk85gvkwldp0mlfm3mgccvm";
@@ -228,6 +225,24 @@ in {
       time-manager = hackage "0.2.2" "1ja8pimvy07b05ifkrg6q0lzs3kh0k2dmncwjdxl81199r559vf5";
       uuid = force;
       zlib = self.zlib_0_7_1_0;
+    };
+  };
+
+  package-sets.mwb-26-04-fixed = {
+    compiler = "mwb-26-04-fixed";
+    overrides = {hackage, force, source, notest, nodoc, nobench, ...}: let
+
+      reduce = pkg: nodoc (nobench (notest pkg));
+
+      github = {owner ? "tek", repo, rev, hash, path ? ""}:
+        reduce (source.sub (config.pkgs.fetchFromGitHub { inherit owner repo rev hash; }) path);
+
+    in {
+      doctest = github {
+        repo = "doctest";
+        rev = "f6f0ea80314ae97a550229c95b15333566c35fe0";
+        hash = "sha256-R3HKHj6+btPodhOyeW50xvZwFqF1IaN3+6dHN9KLjmw=";
+      };
     };
   };
 
@@ -282,30 +297,27 @@ in {
   };
 
   envs.hls-db = {
-    package-set.extends = "mwb-26-01";
+    package-set.extends = "mwb-26-04";
   };
 
   commands.hls.env = "hls-db";
 
   envs.hls = {
-    package-set.extends = "mwb-26-01";
+    package-set.extends = "mwb-26-04";
 
-    overrides = {hackage, fast, force, unbreak, nobench, notest, source, modify, hsLibC, disable, drv, ghcOption, ...}: let
+    overrides = api@{hackage, fast, force, unbreak, nobench, notest, source, modify, hsLibC, disable, drv, ghcOption, self, ...}: let
 
-      reduce = pkg: fast (unbreak (nobench (notest pkg)));
-
-      github = {owner ? "tek", repo, rev, hash, path ? ""}:
-        reduce (source.sub (config.pkgs.fetchFromGitHub { inherit owner repo rev hash; }) path);
+      github = path: fast (mkGithub api path);
 
       rev = "d45b5400b43ec2130ce3197a322891993cb3d73f";
       hash = "sha256-BHBvrVImJAOpm4XY/XeS6Hd2ZzZOcPZuqKRpPKVHGtI=";
 
       hlsPackage = path:
-      ghcOption "-DMWB" (reduce (github {
+      ghcOption "-DMWB" (github {
         repo = "haskell-language-server";
         inherit rev hash;
         inherit path;
-      }));
+      });
 
     in {
 
@@ -329,7 +341,14 @@ in {
       };
 
       Diff = hackage "0.5" "13n231179wa9xm2933f328v00jb486w740yahz4qcbza4yv39w1i";
+      co-log-core = notest;
       directory-ospath-streaming = hackage "0.3" "0m0v200mgmkizm3l6pw9x9gvqx9xancgsal4z1pb7hi2pgrj0w0d";
+      doctest = github {
+        repo = "doctest";
+        rev = "f6f0ea80314ae97a550229c95b15333566c35fe0";
+        hash = "sha256-R3HKHj6+btPodhOyeW50xvZwFqF1IaN3+6dHN9KLjmw=";
+      };
+      doctest-parallel = self.doctest;
       fourmolu = drv null;
       ghc-lib-parser = hackage "9.12.2.20250421" "0qxi41zr50chrr6isyfpff5kq6kqxhc5iri6a8ixvz27042a0hsq";
       ghc-lib-parser-ex = hackage "9.12.0.0" "1kxdwr1vpjn4rlhbvajdh25zjl3wyl8lli0krmdxlp03jg4p2vlx";
