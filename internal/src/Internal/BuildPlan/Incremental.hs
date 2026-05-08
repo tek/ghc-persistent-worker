@@ -12,9 +12,12 @@ import Data.Foldable (fold)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import GHC.Driver.Env (HscEnv (..), hscActiveUnitId)
+import Internal.Compat.GHC914 (hscModuleGraph)
+
 #if !defined(FIXED_NODES)
 import GHC.Driver.Errors.Types (GhcMessage (..))
 #endif
+
 import GHC.Unit (UnitId)
 import GHC.Unit.Home (GenHomeUnit (DefiniteHomeUnit))
 import GHC.Unit.Module (ModuleName)
@@ -30,6 +33,7 @@ import GHC.Unit (GenWithIsBoot (..), IsBootInterface (..))
 import GHC.Unit.Finder (addHomeModuleToFinder, mkHomeModLocation)
 import GHC.Unit.Module.Graph (ModuleNodeInfo (..), NodeKey (..))
 import GHC.Unit.Module.Location (ml_hs_file_ospath)
+import Internal.Compat.GHC914 (moduleNodeEdge)
 import System.FilePath (splitExtension)
 #else
 import GHC.Driver.Make (ModNodeKeyWithUid (..))
@@ -172,7 +176,7 @@ incrementalGraphCache ::
 incrementalGraphCache hsc_env cachedGraph changed =
   mkModuleGraph (depUnitNodes ++ unchangedCurrentNodes)
   where
-    depUnitNodes = filter isDepUnit (mgModSummaries' hsc_env.hsc_mod_graph)
+    depUnitNodes = filter isDepUnit (mgModSummaries' (hscModuleGraph hsc_env))
     unchangedCurrentNodes = filter (not . isChanged) (mgModSummaries' cachedGraph)
 
     activeUnit = hscActiveUnitId hsc_env
@@ -182,6 +186,9 @@ incrementalGraphCache hsc_env cachedGraph changed =
 #if defined(FIXED_NODES)
       ModuleNode _ (ModuleNodeFixed (ModNodeKeyWithUid _ uid) _) -> uid /= activeUnit
       ModuleNode _ (ModuleNodeCompile ms) -> ms_unitid ms /= activeUnit
+#if MIN_VERSION_GLASGOW_HASKELL(9,14,0,0)
+      UnitNode _ _ -> False
+#endif
 #else
       ModuleNode _ ms -> ms_unitid ms /= activeUnit
 #endif
@@ -238,7 +245,7 @@ loadCachedGraphNode :: HscEnv -> UnitId -> JsonFs ModuleName -> CachedModule -> 
 
 loadCachedGraphNode hsc_env unit (JsonFs modName) CachedModule {source, modules, packages} = do
   _ <- addHomeModuleToFinder hsc_env.hsc_FC (DefiniteHomeUnit unit Nothing) modName location HsSrcFile
-  pure $ ModuleNode (homeDeps ++ packageDeps) $
+  pure $ ModuleNode (moduleNodeEdge <$> (homeDeps ++ packageDeps)) $
     ModuleNodeFixed (ModNodeKeyWithUid (GWIB modName NotBoot) unit) location
   where
     fopts = initFinderOpts (hsc_dflags hsc_env)
