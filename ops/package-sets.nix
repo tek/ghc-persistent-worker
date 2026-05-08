@@ -192,6 +192,8 @@ in {
         rev = "f6f0ea80314ae97a550229c95b15333566c35fe0";
         hash = "sha256-R3HKHj6+btPodhOyeW50xvZwFqF1IaN3+6dHN9KLjmw=";
       };
+
+      ghc-server = notest nodoc;
     };
   };
 
