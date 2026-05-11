@@ -4,6 +4,7 @@ module GhcWorker.Run where
 
 import BuckWorkerProto (Instrument, Worker)
 import Common.Grpc (GrpcHandler (..), fromGrpcHandler)
+import Control.Applicative (many, (<|>))
 import Control.Concurrent (MVar, newChan, newMVar)
 import Control.Concurrent.Chan (Chan)
 import Data.Functor (void)
@@ -17,6 +18,7 @@ import Network.GRPC.Server.StreamType (Methods)
 import Options.Applicative (
   Parser,
   ParserInfo,
+  eitherReader,
   execParser,
   fullDesc,
   header,
@@ -25,11 +27,13 @@ import Options.Applicative (
   info,
   long,
   metavar,
+  option,
   progDesc,
   strOption,
   switch,
   (<**>),
   )
+import Types.FeatureFlags (FeatureFlag (..), FeatureFlags (..), defaultFeatureFlags)
 import Types.GhcHandler (WorkerMode (..))
 import Types.Grpc (CommandEnv, RequestArgs)
 import Types.Instrument (Event)
@@ -48,14 +52,36 @@ data CliOptions =
     -- | If this is given, the app should start a GHC server synchronously, listening on the given path.
     serve :: ServerSocketPath,
 
-    instrument :: FeatureInstrument
+    instrument :: FeatureInstrument,
+
+    -- | Runtime feature flags.
+    featureFlags :: FeatureFlags
   }
   deriving stock (Eq, Show)
+
+-- | Parser for runtime feature flags.
+featureFlagsParser :: Parser FeatureFlags
+featureFlagsParser =
+  applyFlags <$> many (
+    (option (flagOption True) (long "enable" <> metavar "FEATURE" <> help "Enable an optional feature"))
+    <|>
+    (option (flagOption False) (long "disable" <> metavar "FEATURE" <> help "Disable an optional feature"))
+    )
+  where
+    -- Placeholder for features introduced in following changes
+    applyFlags =
+      flip foldl' defaultFeatureFlags \ flags -> \case
+
+    flagOption value = do
+      flag <- eitherReader \case
+        flag -> Left ("Invalid feature flag: " ++ flag)
+      pure (value, flag)
 
 cliOptionsParser :: Parser CliOptions
 cliOptionsParser = do
   serve <- serverSocketFromPath <$> strOption (long "serve" <> metavar "SOCKET" <> help "Socket path for the GHC server")
   instrument <- FeatureInstrument <$> switch (long "instrument" <> help "Enable instrumentation")
+  featureFlags <- featureFlagsParser
   pure CliOptions {workerMode = WorkerMakeMode, ..}
 
 cliOptionsParserInfo :: ParserInfo CliOptions
@@ -79,20 +105,21 @@ createInstrumentMethods stateVar recompile = do
 createGhcMethods ::
   MVar WorkerState ->
   WorkerMode ->
+  FeatureFlags ->
   FeatureInstrument ->
   MVar WorkerStatus ->
   Maybe TraceId ->
   Maybe (Chan Event) ->
   IO (CommandEnv -> RequestArgs -> IO (), Methods IO (ProtobufMethodsOf Worker))
-createGhcMethods state workerMode instrument status traceId instrChan =
-  let handler = toGrpcHandler (ghcHandler state workerMode instrument traceId) status state instrChan
+createGhcMethods state workerMode featureFlags instrument status traceId instrChan =
+  let handler = toGrpcHandler (ghcHandler state workerMode featureFlags instrument traceId) status state instrChan
       voidRun commandEnv requestArgs =
         void $ handler.run commandEnv requestArgs
   in pure (voidRun, fromGrpcHandler handler)
 
 -- | Main function for running the default persistent worker using the provided server socket path and CLI options.
 runWorker :: CliOptions -> IO ()
-runWorker CliOptions {workerMode, serve, instrument} = do
+runWorker CliOptions {workerMode, serve, instrument, featureFlags} = do
   state <- newStateWith OneshotCacheFeatures {
     loader = False,
     enable = True,
@@ -104,7 +131,7 @@ runWorker CliOptions {workerMode, serve, instrument} = do
   let
     methods = CreateMethods {
       createInstrumentation = createInstrumentMethods state,
-      createGhc = createGhcMethods state workerMode instrument status traceId
+      createGhc = createGhcMethods state workerMode featureFlags instrument status traceId
     }
   runCentralGhcSpawned methods instrument serve
   where

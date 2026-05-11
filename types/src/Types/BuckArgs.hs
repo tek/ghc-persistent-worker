@@ -29,6 +29,7 @@ import Types.Args (
   parseBuildPlanKey,
   )
 import Types.Compat.GHC914 (sanitizeGhcArgs)
+import Types.FeatureFlags (FeatureFlags, defaultFeatureFlags)
 import Types.Grpc (CommandEnv (..), RequestArgs (..))
 import Types.Target (ModuleTarget (..))
 
@@ -228,8 +229,8 @@ parseField = \case
 
     keys = intercalate " | " ("all" : (buildPlanKey <$> toList buildPlanAll))
 
-toGhcArgs :: BuckArgs -> IO Args
-toGhcArgs args = do
+toGhcArgs :: BuckArgs -> Maybe FeatureFlags -> IO Args
+toGhcArgs args featureFlags = do
   cachedDeps <- traverse (decodeJsonArg "--dep-modules") args.depModules
   cachedBuildPlans <- traverse (decodeJsonArg "--dep-units") args.depUnits
   -- Buck specifies @-B@, which can be used to include more packages in the global package DB.
@@ -260,7 +261,8 @@ toGhcArgs args = do
     cachedBuildPlans,
     cachedDeps,
     homeUnit = args.homeUnit,
-    isBinary = args.isBinary
+    isBinary = args.isBinary,
+    featureFlags = fromMaybe defaultFeatureFlags featureFlags
   }
   where
     packageDbArg path = ["-package-db", path]

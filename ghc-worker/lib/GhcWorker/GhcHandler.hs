@@ -31,6 +31,7 @@ import Types.Args (Args (..))
 import qualified Types.BuckArgs
 import Types.BuckArgs (BuckArgs, IsInterpreted (..), Mode (..), parseBuckArgs, toGhcArgs)
 import Types.Env (Env (..))
+import Types.FeatureFlags (FeatureFlags (..))
 import Types.GhcHandler (WorkerMode (..))
 import Types.Grpc (RequestArgs (..))
 import Types.Log (Logger (..), TraceId, newLog)
@@ -147,17 +148,18 @@ ghcHandler ::
   -- | first req lock hack
   MVar WorkerState ->
   WorkerMode ->
+  FeatureFlags ->
   FeatureInstrument ->
   Maybe TraceId ->
   InstrumentedHandler
-ghcHandler state workerMode instrument traceId =
+ghcHandler state workerMode featureFlags instrument traceId =
   InstrumentedHandler \ hooks -> GrpcHandler \ commandEnv argv -> do
     log <- newLogger <$> newLog traceId
     result <- try do
       buckArgs <- either parseError pure (parseBuckArgs commandEnv argv)
-      args <- toGhcArgs buckArgs
+      args <- toGhcArgs buckArgs (Just featureFlags)
       log.debug (unlines (coerce argv))
-      let env = Env {log, state, args}
+      let env = Env {log, state, args = args}
       dispatch workerMode hooks env buckArgs $ \ target -> do
         when instrument.flag $
           modifyMVar_ state \ st ->
