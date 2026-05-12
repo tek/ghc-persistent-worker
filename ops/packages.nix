@@ -33,6 +33,7 @@
           "ghc"
           "ghc-debug-stub"
           "grapesy"
+          "optparse-applicative"
           "process"
           "text"
         ];
