@@ -63,6 +63,7 @@ library
     GhcServer.Data.UnitConfig
     GhcServer.Cache
     GhcServer.GenProject
+    GhcServer.GenProject.Run
     GhcServer.Handler
     GhcServer.Log
     GhcServer.Path
@@ -114,7 +115,6 @@ executable gen-project
   hs-source-dirs: app/gen-project
   ghc-options: -O2
   build-depends:
-    directory,
     ghc-server
 
 test-suite ghc-server-test
