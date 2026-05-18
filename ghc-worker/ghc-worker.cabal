@@ -92,6 +92,7 @@ test-suite ghc-worker-test
   hs-source-dirs: test
   other-modules:
     BuildPlanTest,
+    FlagParserTest,
     ProjectBuildTest,
     ResourceTest,
     ScheduleTest
