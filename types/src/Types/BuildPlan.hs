@@ -66,7 +66,6 @@ data BuildPlanModule =
     modules :: [(ModuleKey, JsonFs ModuleName)],
     modulesBoot :: [(ModuleKey, JsonFs ModuleName)],
     packages :: [PackageDep],
-    options :: Set String,
     thEnabled :: Bool,
     preprocessor :: Preprocessor
   }
