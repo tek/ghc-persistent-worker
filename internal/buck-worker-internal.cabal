@@ -88,7 +88,6 @@ library
                       Internal.State
                       Internal.State.Finder
                       Internal.State.Make
-                      Internal.State.Stats
                       Internal.State.UnitIndex
                       Internal.State.UnitIndex.Update
                       Internal.UnitEnv
