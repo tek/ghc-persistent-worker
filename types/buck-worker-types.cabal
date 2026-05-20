@@ -48,7 +48,6 @@ library
     Types.State
     Types.State.Finder
     Types.State.Make
-    Types.State.Stats
     Types.Target
   build-depends:
     aeson,
