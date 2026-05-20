@@ -5,7 +5,6 @@ import Data.Set (Set)
 import GHC (HscEnv)
 import Types.Grpc (CommandEnv, RequestArgs)
 import Types.State.Make (MakeState (..))
-import Types.State.Oneshot (OneshotState)
 import Types.Target (TargetSpec)
 
 data BinPath =
@@ -32,6 +31,5 @@ data WorkerState =
     baseSession :: Maybe HscEnv,
     options :: Options,
     make :: MakeState,
-    oneshot :: OneshotState,
     targetArgs :: Map TargetSpec (CommandEnv, RequestArgs)
   }

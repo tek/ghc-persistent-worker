@@ -14,7 +14,7 @@ import GHC.Types.Error (diagnosticCodeNumber)
 import Hedgehog (TestT, evalMaybe, property, test, withTests)
 import Hedgehog.Internal.Property (failWith)
 import Internal.Session (runSession, simpleSessionWithDebugLog)
-import Internal.State (newState, newStateWith)
+import Internal.State (newState)
 import Numeric.Natural (Natural)
 import Prelude hiding (log)
 import System.Directory (removeDirectoryRecursive)
@@ -26,7 +26,6 @@ import Test.Tasty.Hedgehog (testProperty)
 import Types.Args (Args (..), emptyArgs)
 import Types.Env (Env (..))
 import Types.State (WorkerState)
-import Types.State.Oneshot (OneshotCacheFeatures (..))
 
 unitTest ::
   HasCallStack =>
@@ -56,18 +55,12 @@ persistentSession state ghcOptions ma =
 -- | Convenience session runner that creates a one-time use @WorkerState@ prints all log messages to stderr afterwards.
 transientSession :: [String] -> Ghc a -> TestT IO a
 transientSession ghcOptions ma = do
-  state <- liftIO $ newState False
+  state <- liftIO newState
   persistentSession state ghcOptions ma
 
 mkEnv :: IO (Env, IORef TestLog)
 mkEnv = do
-  state <- newStateWith OneshotCacheFeatures {
-    loader = False,
-    enable = True,
-    names = False,
-    finder = False,
-    eps = False
-  }
+  state <- newState
   (log, logVar) <- newTestLog
   pure (Env {
     log,
