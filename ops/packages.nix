@@ -380,6 +380,10 @@
         ];
       };
 
+      executables.compare-features = {
+        source-dirs = "app/compare-features";
+      };
+
       tests.ghc-server-test = {
         dependencies = [
           "aeson"
