@@ -67,3 +67,30 @@ For example, running `cabal build -ffixed-nodes` enables the fixed nodes feature
 
   This allows the worker to hook into the bytecode loading procedure to lazily compile interface Core to bytecode when
   the module is requested for a splice or test execution.
+
+HLS
+===
+
+When the GHC used to build HLS includes patches that influence CPP pragmas in the worker, you need to enable those in
+`cabal.project`.
+
+An HLS version patched for the MWB GHC can be run with `nix run .#hls`.
+
+Cachix
+======
+
+In order to avoid having to rebuild GHC when first using a new upstream change, you can add this Cachix instance to your
+Nix config:
+
+```nix
+  nix = {
+    settings.substituters = ["https://ghc-server.cachix.org"];
+    settings.trusted-public-keys = ["ghc-server.cachix.org-1:VPQv6cKWK7QjnkgE/v2zMBAvqdSdyRsLt2xGh7APKWc="];
+  };
+```
+
+It can be provided as CLI arguments as well:
+
+```
+$ nix --option extra-substituters https://ghc-server.cachix.org --option extra-trusted-public-keys ghc-server.cachix.org-1:VPQv6cKWK7QjnkgE/v2zMBAvqdSdyRsLt2xGh7APKWc= run .#buck-tests
+```
