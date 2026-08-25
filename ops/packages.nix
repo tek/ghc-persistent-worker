@@ -37,6 +37,7 @@
           "optparse-applicative"
           "os-string"
           "process"
+          "silently"
           "text"
         ];
       };
@@ -49,6 +50,7 @@
         enable = true;
         dependencies = [
           "aeson"
+          "async"
           "buck-worker-internal"
           "buck-worker-types"
           "bytestring"
@@ -63,10 +65,8 @@
           "ghc-paths"
           "ghc-worker-test-common"
           "hedgehog"
-          "lens"
           "monad-control"
-          "mtl"
-          "tasty"
+          "tasty >= 1.5"
           "tasty-hedgehog"
           "text"
           "transformers"
@@ -236,8 +236,9 @@
           "filepath"
           "ghc"
           "ghc-paths"
-          "optparse-applicative"
           "os-string"
+          "process"
+          "silently"
           "split"
           "text"
         ];
@@ -277,7 +278,6 @@
           "directory"
           "exceptions"
           "extra"
-          "exceptions"
           "file-io"
           "filepath"
           "generic-lens"
@@ -285,7 +285,9 @@
           "ghc-paths"
           "hashable"
           "hedgehog"
+          "lens"
           "monad-control"
+          "mtl"
           "stm"
           "tasty"
           "tasty-hedgehog"
