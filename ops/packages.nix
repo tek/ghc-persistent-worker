@@ -189,6 +189,7 @@
           "filepath"
           "file-io"
           "ghc"
+          "ghci"
           "ghc-boot"
           "hashable"
           "text"
