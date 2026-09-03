@@ -16,6 +16,7 @@ common all
     DataKinds,
     DerivingStrategies,
     DuplicateRecordFields,
+    GADTs,
     LambdaCase,
     NamedFieldPuns,
     NoFieldSelectors,
@@ -25,6 +26,8 @@ common all
     OverloadedStrings,
     QuasiQuotes,
     RecordWildCards,
+    StandaloneDeriving,
+    StandaloneKindSignatures,
     StrictData,
     TypeFamilies
   build-depends:
@@ -62,6 +65,7 @@ library
     Test.Resume
     Test.Run
     Test.Scheduler
+    Test.Scheduler.Simple
     Test.Source
     Test.Target
   build-depends:
@@ -76,7 +80,6 @@ library
     filepath,
     exceptions,
     extra,
-    generic-lens,
     ghc,
     ghc-paths,
     hashable,
@@ -89,4 +92,5 @@ library
     transformers,
     transformers-base,
     time,
+    stm,
     typed-process

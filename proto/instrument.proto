@@ -8,11 +8,16 @@ message Event {
   bytes encoded = 1;
 }
 
-message RebuildRequest {
-  string target = 1;
+message Command {
+  bytes payload = 1;
+}
+
+message CommandResponse {
+  bytes payload = 1;
 }
 
 service Instrument {
   rpc NotifyMe(Empty) returns (stream Event) {};
-  rpc TriggerRebuild(RebuildRequest) returns (Empty) {};
+  rpc Send(Command) returns (CommandResponse) {};
 }
+

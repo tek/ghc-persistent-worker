@@ -8,11 +8,11 @@ import Ghc.Ui.Data.Session (SessionState (..))
 import Ghc.Ui.Data.Sessions (SessionsState)
 import Ghc.Ui.Render.Popup (popup)
 
-draw :: SessionsState -> Widget Name
-draw ss =
-  popup 50 "Select session" $ renderList drawOption True ss
+renderSessions :: SessionsState -> Widget Name
+renderSessions ss =
+  popup 50 "Select session" $ renderList renderOption True ss
  where
-  drawOption isSel (_, SessionState {title, workers}) =
+  renderOption isSel (_, SessionState {title, workers}) =
     str $
       concat @[]
         [ if isSel then "> " else "  "

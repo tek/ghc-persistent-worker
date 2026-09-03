@@ -1,24 +1,56 @@
 module Ghc.Ui.Data.Main where
 
-import Data.Time (UTCTime (..))
+import Brick.Forms (Form, newForm)
+import Brick.Widgets.List (listSelectedElementL)
+import Data.Text (Text)
+import Data.Time (UTCTime (..), fromGregorian)
 import GHC.Generics (Generic)
 import Ghc.Ui.Data.Name (Name (..))
+import qualified Ghc.Ui.Data.OpLog as OpLog
+import Ghc.Ui.Data.OpLog (OpLogState)
+import Ghc.Ui.Data.ServerProcess (ServerConfig, ServerRoot, newServerConfig, serverConfigFields)
+import Ghc.Ui.Data.Session (SessionState)
+import qualified Ghc.Ui.Data.Sessions as Sessions
 import Ghc.Ui.Data.Sessions (SessionsEvent, SessionsState)
-import Ghc.Ui.Data.WorkerId (WorkerId)
-import Types.Target (TargetSpec)
+import Lens.Micro.Platform (Traversal', _2)
+import Types.Instrument (Target)
 
 data MainEvent =
-  SetTime UTCTime
+  SetTime { time :: UTCTime }
   |
-  SessionSelectorEvent SessionsEvent
+  Sessions { event :: SessionsEvent }
   |
-  TriggerRebuild WorkerId TargetSpec
+  ProcessLog { level :: Text, name :: Text, message :: Text }
+  |
+  ServerStopped { failedPath :: Maybe ServerRoot, stderr :: Text }
+  |
+  OpLogMessage { message :: Text }
+  |
+  ShutdownComplete
+  |
+  CleanCompleted { target :: Target }
 
 data MainState =
   MainState {
     sessions :: SessionsState,
+    serverForm :: Form ServerConfig MainEvent Name,
     currentFocus :: Name,
     previousFocus :: Name,
-    currentTime :: UTCTime
+    currentTime :: UTCTime,
+    opLog :: OpLogState
   }
   deriving stock (Generic)
+
+initialState :: MainState
+initialState =
+  MainState {
+    sessions = Sessions.initialState,
+    currentFocus = Global,
+    previousFocus = Global,
+    currentTime = UTCTime (fromGregorian 1970 1 1) 0,
+    serverForm = newForm serverConfigFields newServerConfig,
+    opLog = OpLog.initialState
+  }
+
+currentSession :: Traversal' MainState SessionState
+currentSession = #sessions . listSelectedElementL . _2

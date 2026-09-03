@@ -101,15 +101,15 @@ evaluate env mHomeUnit target@(ModuleTarget modu) imports expr = do
         logDebugD env.log (text (show homeUnit))
         hsc_env2 <- liftIO $ withMVar env.state \ state -> do
           (_, hsc_env1) <-
-            loadHomeUnit env.log dflags0 env.args.features (moduleUnitId target.mod) (state, hsc_env0) (toOsPath homeUnit)
+            loadHomeUnit env.log dflags0 env.args.features (moduleUnitId target.module_) (state, hsc_env0) (toOsPath homeUnit)
           pure hsc_env1 {hsc_mod_graph = state.make.moduleGraph}
-        let hsc_env = hscSetActiveUnitId (moduleUnitId target.mod) (hsc_env2)
+        let hsc_env = hscSetActiveUnitId (moduleUnitId target.module_) (hsc_env2)
         GHC.setSession hsc_env
         dflags <- GHC.getSessionDynFlags
         GHC.setInteractiveDynFlags dflags
         let home_unit = hsc_home_unit hsc_env
             home_unit_id = homeUnitId home_unit
-            uid = moduleUnitId target.mod
+            uid = moduleUnitId target.module_
 
         let modname = moduleName modu
             pkgqual = ThisPkg home_unit_id
@@ -223,9 +223,9 @@ executeMain env mHomeUnit target@(ModuleTarget modu) = do
       Just homeUnit -> do
         hsc_env2 <- liftIO $ withMVar env.state \ state -> do
           (_, hsc_env1) <-
-            loadHomeUnit env.log dflags0 env.args.features (moduleUnitId target.mod) (state, hsc_env0) (toOsPath homeUnit)
+            loadHomeUnit env.log dflags0 env.args.features (moduleUnitId target.module_) (state, hsc_env0) (toOsPath homeUnit)
           pure hsc_env1 {hsc_mod_graph = state.make.moduleGraph}
-        let hsc_env = hscSetActiveUnitId (moduleUnitId target.mod) hsc_env2
+        let hsc_env = hscSetActiveUnitId (moduleUnitId target.module_) hsc_env2
         GHC.setSession hsc_env
         dflags <- GHC.getSessionDynFlags
         GHC.setInteractiveDynFlags dflags

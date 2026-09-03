@@ -6,7 +6,7 @@ import Control.Concurrent.MVar (MVar, modifyMVar, modifyMVar_, newMVar, withMVar
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (traverse_)
 import Data.Map.Strict qualified as M
-import GHC (Ghc, emptyMG, HscEnv)
+import GHC (Ghc, HscEnv, emptyMG)
 import GHC.Driver.Monad (modifySessionM, withSession)
 import GHC.Unit.Home.Graph (unitEnv_new)
 import Internal.Cache.Bytecode (evictBcoCache, evictSpecific)
@@ -15,10 +15,10 @@ import qualified Internal.State.Make as Make
 import Internal.State.UnitIndex (newUnitIndex)
 import System.Environment (lookupEnv)
 import System.OsPath.Extra (toOsPath)
+import Types.FeatureFlags (FeatureFlags (..))
 import Types.Log (Logger (..))
 import Types.State (BinPath (..), WorkerState (..))
 import Types.State.Make (MakeState (..), emptyLibLoadState)
-import Types.FeatureFlags (FeatureFlags (..))
 
 newState :: IO (MVar WorkerState)
 newState = do
@@ -43,8 +43,7 @@ newState = do
       bcoAccessCounter = 0,
       pendingEvictions = mempty,
       bcoHistory = M.empty
-    },
-    targetArgs = mempty
+    }
   }
 
 modifyMakeState :: MVar WorkerState -> (MakeState -> IO (MakeState, a)) -> IO a

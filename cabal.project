@@ -1,6 +1,7 @@
 packages: ./buck-proxy
-          ./ghc-worker
           ./ghc-proxy
+          ./ghc-server
+          ./ghc-worker
           ./grpc
           ./internal
           ./proto
@@ -26,6 +27,9 @@ allow-newer:
   , ghc-debug-brick:*
   , ghc-debug-client:*
   , tasty-hedgehog:hedgehog
+
+constraints:
+  grapesy >= 1.1.1
 
 if (impl(ghc >= 9.11))
   allow-newer:

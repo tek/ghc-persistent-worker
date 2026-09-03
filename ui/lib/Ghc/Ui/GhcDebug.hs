@@ -3,7 +3,7 @@ module Ghc.Ui.GhcDebug where
 import Brick (BrickEvent (..), EventM, attrMap, get, on)
 import Brick.BChan (newBChan)
 import Brick.Main (App (..), customMainWithDefaultVty, halt, showFirstCursor)
-import Control.Exception (bracket, handle)
+import Control.Exception (bracket, displayException, handle)
 import Control.Monad.IO.Class (liftIO)
 import GHC.Debug.Brick.Lib (debuggeeConnect, pause, resume, version)
 import GHC.Debug.Brick.Model (
@@ -55,8 +55,12 @@ captureEsc evt = do
       halt
     _ -> myAppHandleEvent evt
 
-debug :: String -> IO ()
-debug socketPath = handle @IOError (\_ -> pure ()) $ do
+-- | Connect to a paused @ghc-debug@ socket and open the debug-heap browser as a suspended sub-application (see
+-- 'Ghc.Ui.Event.Main.handleGlobalKey's @d@ key). Reports a connection failure (e.g. no debuggee listening at
+-- the given socket) as 'Left' instead of silently swallowing it, so the caller can surface it in the op log
+-- rather than the key press appearing to do nothing.
+debug :: String -> IO (Either String ())
+debug socketPath = handle @IOError (pure . Left . displayException) $ do
   socket <- mkSocketInfo socketPath
   eventChan <- newBChan 10
   bracket
@@ -92,4 +96,5 @@ debug socketPath = handle @IOError (\_ -> pure ()) $ do
               }
       (_, vty) <- customMainWithDefaultVty (Just eventChan) app appState
       Vty.shutdown vty
+      pure (Right ())
     )

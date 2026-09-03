@@ -3,6 +3,8 @@ module Internal.Error where
 import Control.Exception (AsyncException (..), Exception (..), IOException, throwIO)
 import qualified Control.Monad.Catch as MC
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import qualified Data.Text as Text
+import Data.Text (Text)
 import GHC (DynFlags, Ghc, GhcException (..), GhcMonad, getSessionDynFlags, noSrcSpan, printException)
 import GHC.Data.Bag (listToBag)
 import GHC.Data.FastString (mkFastString)
@@ -159,3 +161,11 @@ eitherWorkerError ::
   m a
 eitherWorkerError =
   either workerError pure
+
+throwText :: MonadIO m => Text -> m a
+throwText err =
+  liftIO $ throwIO $ userError (Text.unpack err)
+
+throwTextLeft :: MonadIO m => Either Text a -> m a
+throwTextLeft =
+  either throwText pure

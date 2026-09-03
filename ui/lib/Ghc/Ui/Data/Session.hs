@@ -1,18 +1,21 @@
 module Ghc.Ui.Data.Session where
 
-import Data.Generics.Labels ()
 import Data.Map qualified as Map
 import Data.Map (Map)
 import Data.Text (Text)
 import Data.Time (UTCTime)
 import GHC.Generics (Generic)
+import Ghc.Ui.Data.Log qualified as Log
+import Ghc.Ui.Data.Log (LogState)
+import Ghc.Ui.Data.Project qualified as Project
+import Ghc.Ui.Data.Project (ProjectState)
 import qualified Ghc.Ui.Data.Tasks as Tasks
 import Ghc.Ui.Data.Tasks (TasksState)
 import Ghc.Ui.Data.WorkerId (WorkerId)
-import Ghc.Ui.ModuleSelector qualified as ModuleSelector
 import Network.GRPC.Client (Connection)
 import Types.Instrument qualified as Shared
 
+-- TODO Rename to SessionId
 newtype Id =
   Id { text :: Text }
   deriving stock (Eq, Ord, Show)
@@ -27,7 +30,7 @@ data Worker =
 
 data Stats =
   Stats {
-    memory :: Map.Map String Int, -- in bytes
+    memory :: Map Text Int, -- in bytes
     gc_cpu_ns :: Int,
     cpu_ns :: Int
   }
@@ -52,8 +55,9 @@ data SessionState =
   SessionState {
     title :: String,
     workers :: Map WorkerId Worker,
-    activeTasks :: TasksState,
-    modules :: ModuleSelector.State,
+    tasks :: TasksState,
+    project :: ProjectState,
+    log :: LogState,
     sesStartTime :: UTCTime,
     sesEndTime :: Maybe UTCTime,
     finishedWorkerStats :: Stats
@@ -67,8 +71,9 @@ initialState title startTime =
   SessionState {
     title,
     workers = [],
-    activeTasks = Tasks.initialState,
-    modules = ModuleSelector.initialState,
+    tasks = Tasks.initialState,
+    project = Project.initialState,
+    log = Log.initialState,
     sesStartTime = startTime,
     sesEndTime = Nothing,
     finishedWorkerStats = mempty
