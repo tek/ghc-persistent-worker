@@ -16,7 +16,7 @@ import Internal.State.UnitIndex (newUnitIndex)
 import System.Environment (lookupEnv)
 import System.OsPath.Extra (toOsPath)
 import Types.Log (Logger (..))
-import Types.State (BinPath (..), WorkerState (..), defaultOptions)
+import Types.State (BinPath (..), WorkerState (..))
 import Types.State.Make (MakeState (..), emptyLibLoadState)
 import Types.FeatureFlags (FeatureFlags (..))
 
@@ -31,7 +31,6 @@ newState = do
       extra = mempty
     },
     baseSession = Nothing,
-    options = defaultOptions,
     make = MakeState {
       moduleGraph = emptyMG,
       moduleGraphNodes = M.empty,
