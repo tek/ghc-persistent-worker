@@ -115,6 +115,11 @@ in {
     expose.scoped = true;
   };
 
+  envs.mercury-ghc9141 = defaultEnv [] // {
+    expose.scoped = true;
+    package-set.extends = "mercury-ghc9141";
+  };
+
   envs.profiled = defaultEnv [({notest, ...}: { ghc-worker = notest; ghc-server = notest; })];
 
   envs.ghc914 = {
@@ -201,8 +206,8 @@ in {
     };
   };
 
-  package-sets.ghc914 = {
-    compiler.extends = "ghc914";
+  package-sets.mercury-ghc9141 = {
+    compiler = "mercury-ghc9141";
     overrides = api@{hackage, force, notest, ...}: let
 
       github = mkGithub api;
