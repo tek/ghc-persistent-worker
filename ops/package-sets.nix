@@ -56,6 +56,8 @@
   mkGithub = {force, source, nodoc, ...}: {owner ? "tek", repo, rev, hash, path ? ""}:
     nodoc (force (source.sub (config.pkgs.fetchFromGitHub { inherit owner repo rev hash; }) path));
 
+  # The `eventlog-live-otlp` executable, provided by the `eventlog-live` package.
+  eventlogLive = build.envs.eventlog-live.toolchain.packages.eventlog-live;
 in {
 
   envs.ghc910 = {
@@ -71,7 +73,49 @@ in {
 
   envs.dev = defaultEnv [] // {
     buildInputs = pkgs: [pkgs.zlib pkgs.snappy pkgs.protobuf build.envs.dev.toolchain.packages.proto-lens-protoc];
+    shellTools = _: [eventlogLive];
   };
+
+  envs.eventlog-live = {
+    hls.enable = lib.mkForce false;
+
+    packages = [];
+    localDeps = false;
+    localOverrides = false;
+    globalOverrides = false;
+    inheritOverrides = false;
+
+    package-set.compiler = {
+      nixpkgs = "ghc914";
+      source = "ghc910";
+    };
+
+    overrides = {hackage, force, notest, nodoc, ...}: let
+
+      # These are all built from source here, so skip tests and haddocks.
+      quick = pkg: nodoc (notest pkg);
+
+    in {
+      eventlog-live = quick (hackage "0.9.0.0" "sha256-3WBXxtAN6cyuvBbSdrM94RMmx5UakRuT54xAyJbjEn0=");
+      ghc-stack-profiler-core = quick (hackage "0.3.0.0" "sha256-/vDk6875q0Mgdj2kR8egjqEE1DfRe31ju2ur7h+rfGs=");
+      ipedb = quick (hackage "0.2.0.1" "sha256-aClV9PwZCCMaWHjmJX1CbzeqhYjsdbATXjIhju4ETao=");
+
+      lsm-tree = quick (hackage "1.1.1.0" "sha256-Qcv+TBYo9YUsgMnuA006K+2T7ax/AUynE/45vXA82Zo=");
+      tar = quick (hackage "0.7.2.0" "sha256-2ro8OLWOQ7cOwjJMK8qpEsFnmLKJiFMvCSOXqlnFSlA=");
+
+      # `lsm-tree >= 1.1` requires `blockio >= 0.2`, which needs `blockio-uring >= 0.2`
+      blockio = quick (hackage "0.2.1.0" "sha256-FANzKBEOyi82DK6iRZbwyMjjEGg3zdezGtj/c9ltdZQ=");
+      blockio-uring = quick (hackage "0.2.0.0" "sha256-i7Ei0cQgoksvUsxz9mXalxnLwB4qh3LrnEE/2mp/fbA=");
+
+      # Marked broken in nixpkgs.
+      fs-api = force;
+      quickcheck-state-machine = force;
+      http2-tls = quick (hackage "0.4.9" "sha256-JBo7KAHUd36icFR+HXtuGr3chrrPOgDhBYfrhcdPXBs=");
+      tls = quick (hackage "2.1.14" "sha256-OuqaybKbQfb9m9GtNCtpZJ2zRNOnPcPbDQGvTfK+9xM=");
+    };
+  };
+
+  outputs.packages.eventlog-live = eventlogLive;
 
   envs.min = defaultEnv [];
 
